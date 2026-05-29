@@ -1,57 +1,93 @@
-# parser.py — 4개 학교 파일 실측 검증 완료
-import pandas as pd
+"""교육과정 학점 배당표 엑셀 파서 — 4개 학교 파일 검증 완료"""
 import openpyxl, re, unicodedata
+from pathlib import Path
 
-def normalize(s):
-    """문자열 정규화: 유니코드 통일+공백 압축. 표기 차이 흡수."""
+def _norm(s):
     if s is None: return ""
     s = unicodedata.normalize("NFKC", str(s))
-    s = s.replace("\n", " ").replace("\r", " ")
+    s = s.replace("\n", " ").replace("\u3000", " ")
     return re.sub(r"\s+", " ", s).strip()
 
-def find_data_sheet(wb):
-    """시트명 자동 탐지: '입학생' 키워드 우선, 다음 작성요령·데이터베이스 제외."""
-    for n in wb.sheetnames:
-        if "입학생" in n: return n
-    for n in wb.sheetnames:
-        if "작성" not in n and "데이터" not in n: return n
-    return wb.sheetnames[0]
+def _to_num(v):
+    """'28~30', '[2]', '3(택2)' 등에서 첫 숫자 추출"""
+    if v is None: return None
+    if isinstance(v, (int, float)): return float(v)
+    m = re.search(r"\d+(?:\.\d+)?", str(v))
+    return float(m.group()) if m else None
 
-def load_sheet(file_or_path):
-    """파일 경로 또는 업로드 파일 객체에서 16열 전체를 데이터프레임으로 로드."""
-    wb = openpyxl.load_workbook(file_or_path, data_only=True)
-    sn = find_data_sheet(wb)
-    ws = wb[sn]
-    rows = [list(r) for r in ws.iter_rows(min_row=1, max_row=ws.max_row, max_col=16, values_only=True)]
-    return pd.DataFrame(rows), sn
+def find_target_sheet(wb):
+    """'xxxx입학생' 시트 탐지 (괄호 부기·공백 허용)"""
+    for name in wb.sheetnames:
+        if re.search(r"\d{4}\s*입학생", name):
+            return name
+    return None
 
-def detect_anchors(df):
-    """키워드 기반 앵커행 자동 탐지: 합계시작, 창체, 학년별 총계."""
-    a = {}
-    for i, row in df.iterrows():
-        joined = " ".join(normalize(v) for v in row if v is not None)
-        if "교과 이수 학점 소계" in joined and "sum_start" not in a: a["sum_start"] = i
-        if "창의적 체험활동" in joined and "cea" not in a: a["cea"] = i
-        if "학년별 총 이수 학점" in joined and "total" not in a: a["total"] = i
-    a["data_start"] = 6  # 헤더 R1~R5 다음
-    a["data_end"] = a.get("sum_start", len(df)) - 1
-    return a
+def find_data_range(ws):
+    """헤더/데이터/합계 영역 행 번호 자동 탐지"""
+    header_row, data_start, summary_start = None, None, None
+    for r in range(1, min(ws.max_row, 30) + 1):
+        if _norm(ws.cell(r, 2).value) == "교과(군)":
+            header_row, data_start = r, r + 4   # 헤더 + 부속(1) + 여백(2)
+            break
+    for r in range(ws.max_row, 0, -1):
+        for c in range(1, 5):
+            v = _norm(ws.cell(r, c).value).replace(" ", "")
+            if "교과이수학점소계" in v:
+                summary_start = r; break
+        if summary_start: break
+    return header_row, data_start, summary_start
 
-def parse_subjects(df, a):
-    """과목 데이터 추출 + 16개 컬럼 의미 부여 + 병합셀 forward-fill."""
-    sub = df.iloc[a["data_start"]:a["data_end"]+1].copy()
-    sub.columns = ["A_grade","B_group","C_type","D_name","E_base","F_op",
-                   "G_1_1","H_1_2","I_2_1","J_2_2","K_3_1","L_3_2",
-                   "M_note","N_open","O_credit","P_required"]
-    for c in ["A_grade","B_group","O_credit","P_required"]:
-        sub[c] = sub[c].ffill()
-    for c in ["B_group","C_type","D_name","M_note"]:
-        sub[c] = sub[c].apply(normalize)
-    return sub.reset_index(drop=True)
+def parse_curriculum(path):
+    wb = openpyxl.load_workbook(path, data_only=True)
+    sheet = find_target_sheet(wb)
+    if not sheet: raise ValueError("xxxx입학생 시트를 찾을 수 없습니다.")
+    ws = wb[sheet]
+    h, ds, ss = find_data_range(ws)
+    if not (h and ds and ss): raise ValueError("데이터 범위 탐지 실패.")
 
-def parse_file(file_or_path):
-    """상위 함수: 파일 → (원본df, 앵커, 과목df, 시트명)."""
-    df_raw, sheet = load_sheet(file_or_path)
-    anchors = detect_anchors(df_raw)
-    subjects = parse_subjects(df_raw, anchors)
-    return df_raw, anchors, subjects, sheet
+    # 병합 셀 forward-fill
+    mmap = {}
+    for mr in ws.merged_cells.ranges:
+        top = ws.cell(mr.min_row, mr.min_col).value
+        for r in range(mr.min_row, mr.max_row + 1):
+            for c in range(mr.min_col, mr.max_col + 1):
+                mmap[(r, c)] = top
+    cell = lambda r, c: mmap.get((r, c), ws.cell(r, c).value)
+
+    rows, last_g, last_t = [], "", ""
+    for r in range(ds, ss):
+        gun, typ, subj = _norm(cell(r,2)), _norm(cell(r,3)), _norm(cell(r,4))
+        if gun: last_g = gun
+        else: gun = last_g
+        if typ: last_t = typ
+        else: typ = last_t
+        if not subj: continue
+        rows.append({
+            "row": r, "교과군": gun, "과목유형": typ, "과목명": subj,
+            "기본학점": _to_num(cell(r,5)), "운영학점": _to_num(cell(r,6)),
+            "1-1": _to_num(cell(r,7)),  "1-2": _to_num(cell(r,8)),
+            "2-1": _to_num(cell(r,9)),  "2-2": _to_num(cell(r,10)),
+            "3-1": _to_num(cell(r,11)), "3-2": _to_num(cell(r,12)),
+            "비고": _norm(cell(r,13)),
+        })
+
+    summary = {}
+    for r in range(ss, min(ws.max_row, ss+10)+1):
+        for c in range(1, 5):
+            lbl = _norm(cell(r, c))
+            if not lbl: continue
+            terms = [_to_num(cell(r, c2)) for c2 in range(7, 13)]
+            if "교과 이수 학점 소계" in lbl:
+                summary["교과소계"] = _to_num(cell(r, 6))
+                summary["교과학기"] = terms
+            if "창의적 체험활동" in lbl:
+                summary["창체"] = _to_num(cell(r, 6))
+                summary["창체학기"] = terms
+            if ("총 이수" in lbl or "학년별" in lbl) and "총학기" not in summary:
+                summary["총학기"] = terms
+
+    return {
+        "school": Path(path).stem.split("_")[0],
+        "sheet": sheet, "header_row": h, "data_start": ds, "summary_start": ss,
+        "rows": rows, "summary": summary,
+    }
