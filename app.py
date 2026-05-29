@@ -1,17 +1,17 @@
-"""Streamlit 교육과정 자동 검토 앱 - 안정 버전"""
+"""Streamlit 교육과정 자동 검토 앱 - 디스크 파일 방식"""
 import warnings
 warnings.filterwarnings("ignore")
 
 import streamlit as st
 import pandas as pd
-from io import BytesIO
+import os
 import traceback
 
 st.set_page_config(page_title="교육과정 검토", layout="wide")
 st.title("고등학교 교육과정 자동 검토")
 st.caption("2022 개정 교육과정 · 자율점검표 기반")
 
-# ----- 모듈 임포트 (실패 시 즉시 표시) -----
+# ----- 모듈 임포트 -----
 try:
     from parser import parse_curriculum
     from checker import check_curriculum
@@ -23,25 +23,39 @@ except Exception as e:
 # ----- 업로드 -----
 uploaded = st.file_uploader(
     "학점 배당표 엑셀 파일 업로드 (.xlsx)",
-    type=["xlsx"],
-    help="○○고등학교_2026학년도 입학생 교육과정 학점 배당표.xlsx"
+    type=["xlsx"]
 )
 
 if not uploaded:
     st.info("파일을 업로드하면 자동으로 검토가 시작됩니다.")
     st.stop()
 
-# ----- 파싱 (BytesIO 방식 - 임시파일 사용 안 함) -----
+# ----- 디스크에 저장 (BytesIO 사용 금지) -----
+UPLOAD_DIR = "/tmp/curri_uploads"
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+safe_name = uploaded.name.replace("/", "_").replace("\\", "_")
+tmp_path = os.path.join(UPLOAD_DIR, safe_name)
+
+with open(tmp_path, "wb") as f:
+    f.write(uploaded.getvalue())
+
+st.caption(f"임시 저장 경로: `{tmp_path}`")
+
+# ----- 파싱 -----
 with st.spinner("파일 파싱 중..."):
     try:
-        bio = BytesIO(uploaded.getvalue())
-        parsed = parse_curriculum(bio)
-        # school 이름은 업로드 파일명에서 추출
-        parsed["school"] = uploaded.name.split("_")[0].replace(".xlsx", "")
+        parsed = parse_curriculum(tmp_path)
     except Exception as e:
         st.error(f"파싱 실패: {e}")
         with st.expander("오류 상세"):
             st.code(traceback.format_exc())
+        # 진단 정보
+        try:
+            import openpyxl
+            wb_probe = openpyxl.load_workbook(tmp_path, data_only=True, read_only=True)
+            st.write("워크북 시트 목록:", wb_probe.sheetnames)
+        except Exception as e2:
+            st.write(f"진단도 실패: {e2}")
         st.stop()
 
 st.success(f"파싱 완료 — 시트: `{parsed['sheet']}` · 과목 행: {len(parsed['rows'])}개")
@@ -55,6 +69,12 @@ with st.spinner("검토 기준 적용 중..."):
         with st.expander("오류 상세"):
             st.code(traceback.format_exc())
         st.stop()
+
+# ----- 임시 파일 삭제 -----
+try:
+    os.unlink(tmp_path)
+except Exception:
+    pass
 
 # ----- 헤더 -----
 st.markdown("---")
@@ -90,23 +110,14 @@ for r in fails:
 for r in warns:
     st.warning(f"**WARN · {r['id']}** {r['항목']} — {r['근거']}")
 
-# ----- 영역별 상세 (Styler 없이 plain DataFrame) -----
+# ----- 영역별 상세 -----
 st.markdown("### 영역별 상세 검토 결과")
 df = pd.DataFrame(results)
 
 for area in sorted(df['영역'].unique()):
     sub = df[df['영역'] == area][['id','항목','기준','측정값','결과','근거']].reset_index(drop=True)
     st.markdown(f"**{area}**")
-    # Styler 사용 안 함 - column_config로 충분
-    st.dataframe(
-        sub,
-        use_container_width=True,
-        hide_index=True,
-        column_config={
-            "결과": st.column_config.TextColumn("결과", width="small"),
-            "근거": st.column_config.TextColumn("근거", width="large"),
-        }
-    )
+    st.dataframe(sub, use_container_width=True, hide_index=True)
 
 # ----- CSV 다운로드 -----
 st.markdown("### 결과 내보내기")
@@ -118,7 +129,7 @@ st.download_button(
     mime="text/csv"
 )
 
-# ----- 디버그 정보 (접힘) -----
+# ----- 디버그 정보 -----
 with st.expander("디버그 정보"):
     st.json({
         "시트명": parsed['sheet'],
