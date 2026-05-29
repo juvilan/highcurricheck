@@ -126,4 +126,22 @@ def check_curriculum(parsed):
     add("D2","D.균형","국·수·영 합계 ≤ 81","≤ 81학점",f"{KSE:.0f}",
         "PASS" if KSE <= 81 else "FAIL", "국+수+영 운영학점 합")
 
-    add("D3","D.균형","교과 174 초과분 50% 룰","초과분의 50% 진
+    add("D3","D.균형","교과 174 초과분 50% 룰","초과분의 50% 진로/융합/체예교",
+        "수동확인 권장","INFO","비고 분석 필요")
+
+    # ====== E. 표기 ======
+    bad = []
+    for x in rows:
+        nm = x['과목명']
+        if nm != nm.strip(): bad.append((x['row'], nm, '앞뒤 공백'))
+        elif '  ' in nm: bad.append((x['row'], nm, '연속 공백'))
+        elif re.fullmatch(r'.+[I]{1,2}', nm) and 'Ⅰ' not in nm and 'Ⅱ' not in nm:
+            bad.append((x['row'], nm, '영문 I/II'))
+    head = "; ".join([f"R{a}: {b} ({c})" for a,b,c in bad[:6]])
+    add("E1","E.표기","과목명 표기 정합성","공백 없음, Ⅰ/Ⅱ 로마자",
+        f"위반 {len(bad)}건","PASS" if not bad else "WARN",
+        head + (f" 외 {len(bad)-6}건" if len(bad)>6 else "") if bad else "이상 없음")
+    add("E2","E.표기","학점 배당표 기록 형식","교차이수 [ ], 'n학점(택k)'",
+        "수동확인 권장","INFO","표기 자동 검증 한계")
+
+    return R
