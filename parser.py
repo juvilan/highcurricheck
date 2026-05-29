@@ -1,4 +1,7 @@
-"""교육과정 학점 배당표 엑셀 파서 — 4개 학교 파일 검증 완료"""
+"""교육과정 학점 배당표 엑셀 파서"""
+import warnings
+warnings.filterwarnings("ignore")   # openpyxl UserWarning 차단
+
 import openpyxl, re, unicodedata
 from pathlib import Path
 
