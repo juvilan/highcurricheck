@@ -4,6 +4,7 @@ import io
 import csv
 import traceback
 from collections import OrderedDict
+from urllib.parse import quote
 
 from flask import (
     Flask, request, render_template, redirect, url_for, abort, Response
@@ -175,10 +176,15 @@ def export_csv(rec_id):
     w.writeheader()
     w.writerows(results)
     fname = f"{rec['school']}_검토결과.csv"
+    fname_q = quote(fname)  # RFC 5987: 헤더에 들어가는 값은 퍼센트 인코딩 필요
     return Response(
         buf.getvalue(),
         mimetype="text/csv; charset=utf-8",
-        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{fname}"},
+        headers={
+            "Content-Disposition": (
+                f"attachment; filename=download.csv; filename*=UTF-8''{fname_q}"
+            )
+        },
     )
 
 
