@@ -1,0 +1,18 @@
+{% extends "layout.html" %}
+{% block content %}
+  <h2 style="font-size:20px; margin:0 0 4px;">업데이트 내역</h2>
+  <div class="cap">검토 로직·기능 변경 사항을 여기서 확인하세요.</div>
+
+  {% for entry in changelog %}
+    <div class="card" style="margin:12px 0; padding:16px;">
+      <div style="font-weight:700; margin-bottom:8px;">{{ entry.date }}</div>
+      <ul style="margin:0; padding-left:18px; line-height:1.8; font-size:14px;">
+        {% for it in entry['items'] %}
+          <li>{{ it }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+  {% else %}
+    <div class="cap">등록된 업데이트가 없습니다.</div>
+  {% endfor %}
+{% endblock %}

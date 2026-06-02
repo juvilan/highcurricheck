@@ -1,0 +1,66 @@
+{% extends "layout.html" %}
+{% block content %}
+  <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+    <h2 style="margin:0; font-size:20px;">{{ school }} 검토 결과</h2>
+    {% if saved_id %}
+      <a class="btn" href="{{ url_for('export_csv', rec_id=saved_id) }}">CSV 다운로드</a>
+      <form method="post" action="{{ url_for('delete', rec_id=saved_id) }}" style="display:inline;"
+            onsubmit="return confirm('이 검토 기록을 삭제할까요?');">
+        <button class="btn danger" type="submit">이 검토 삭제</button>
+      </form>
+    {% endif %}
+    <a class="btn" href="{{ url_for('index') }}">새 검토</a>
+  </div>
+  <div class="cap">검토 단위: {{ results|length }}개 · 시트: <code>{{ sheet }}</code></div>
+
+  <div class="cards">
+    {% for k, v in counts.items() %}
+      <div class="card">
+        <div class="k">{{ k }}</div>
+        <div class="v res-{{ 'NA' if k == 'N/A' else k }}">{{ v }}</div>
+      </div>
+    {% endfor %}
+  </div>
+
+  <h3>주요 발견 사항</h3>
+  {% if not fails and not warns %}
+    <div class="callout ok">FAIL/WARN 항목 없음. 모든 정량 기준 통과.</div>
+  {% endif %}
+  {% for r in fails %}
+    <div class="callout fail"><b>FAIL · {{ r.id }}</b> {{ r['항목'] }} — {{ r['근거'] }}</div>
+  {% endfor %}
+  {% for r in warns %}
+    <div class="callout warn"><b>WARN · {{ r.id }}</b> {{ r['항목'] }} — {{ r['근거'] }}</div>
+  {% endfor %}
+
+  <h3 style="margin-top:24px;">영역별 상세 검토 결과</h3>
+  {% for area, rows in grouped %}
+    <div class="areahead">{{ area }}</div>
+    <table>
+      <thead><tr>
+        <th>id</th><th>항목</th><th>기준</th><th>측정값</th><th>결과</th><th>근거</th>
+      </tr></thead>
+      <tbody>
+      {% for r in rows %}
+        <tr>
+          <td>{{ r.id }}</td>
+          <td>{{ r['항목'] }}</td>
+          <td>{{ r['기준'] }}</td>
+          <td>{{ r['측정값'] }}</td>
+          <td class="res-{{ 'NA' if r['결과'] == 'N/A' else r['결과'] }}">{{ r['결과'] }}</td>
+          <td>{{ r['근거'] }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  {% endfor %}
+
+  <details>
+    <summary>디버그 정보</summary>
+    <pre>시트명: {{ sheet }}
+과목수(검토단위): {{ results|length }}
+summary: {{ summary }}
+{% if debug %}{% for k, v in debug.items() %}{{ k }}: {{ v }}
+{% endfor %}{% endif %}</pre>
+  </details>
+{% endblock %}

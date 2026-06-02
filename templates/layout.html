@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}고등학교 교육과정 자동 검토{% endblock %}</title>
+<style>
+  :root{ --pass:#15803d; --fail:#b91c1c; --warn:#b45309; --info:#4b5563; --na:#6b7280; --line:#d1d5db; --muted:#6b7280; }
+  *{ box-sizing:border-box; }
+  body{ margin:0; font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Segoe UI",Roboto,sans-serif; color:#111827; background:#f9fafb; }
+  a{ color:#1d4ed8; text-decoration:none; } a:hover{ text-decoration:underline; }
+  .wrap{ display:flex; min-height:100vh; }
+  .side{ width:280px; flex:0 0 280px; background:#fff; border-right:1px solid var(--line); padding:18px 16px; overflow-y:auto; }
+  .side h2{ font-size:14px; margin:0 0 12px; color:#374151; }
+  .side .empty{ color:var(--muted); font-size:13px; }
+  .hist a{ display:block; padding:8px 10px; border:1px solid var(--line); border-radius:8px; margin-bottom:6px; font-size:12.5px; color:#111827; }
+  .hist a:hover{ background:#f3f4f6; text-decoration:none; }
+  .hist .meta{ color:var(--muted); font-size:11px; }
+  .hist .badge{ font-weight:600; }
+  .main{ flex:1; padding:28px 32px; max-width:1100px; }
+  h1{ font-size:24px; margin:0 0 2px; }
+  .cap{ color:var(--muted); font-size:13px; margin-bottom:20px; }
+  .cards{ display:grid; grid-template-columns:repeat(5,1fr); gap:10px; margin:14px 0 24px; }
+  .card{ border:1px solid var(--line); border-radius:8px; padding:12px; background:#fff; }
+  .card .k{ font-size:11px; color:var(--muted); }
+  .card .v{ font-size:28px; font-weight:700; margin-top:4px; }
+  .callout{ border-radius:8px; padding:10px 12px; margin:6px 0; font-size:13.5px; border:1px solid; }
+  .callout.fail{ background:#fef2f2; border-color:#fecaca; color:#7f1d1d; }
+  .callout.warn{ background:#fffbeb; border-color:#fde68a; color:#7c2d12; }
+  .callout.ok{ background:#f0fdf4; border-color:#bbf7d0; color:#14532d; }
+  table{ border-collapse:collapse; width:100%; font-size:13px; margin:8px 0 20px; background:#fff; }
+  th,td{ border:1px solid var(--line); padding:6px 8px; text-align:left; vertical-align:top; }
+  th{ background:#f3f4f6; font-weight:600; }
+  .res-PASS{ color:var(--pass); font-weight:600; } .res-FAIL{ color:var(--fail); font-weight:700; }
+  .res-WARN{ color:var(--warn); font-weight:700; } .res-INFO{ color:var(--info); } .res-NA{ color:var(--na); }
+  .btn{ display:inline-block; padding:8px 14px; border-radius:8px; border:1px solid var(--line); background:#fff; cursor:pointer; font-size:13px; }
+  .btn.primary{ background:#1d4ed8; color:#fff; border-color:#1d4ed8; }
+  .btn.danger{ color:var(--fail); border-color:#fecaca; }
+  .upload{ border:2px dashed var(--line); border-radius:12px; padding:28px; background:#fff; text-align:center; }
+  .err{ background:#fef2f2; border:1px solid #fecaca; color:#7f1d1d; padding:12px 14px; border-radius:8px; margin-bottom:14px; }
+  details{ margin-top:16px; } summary{ cursor:pointer; color:var(--muted); font-size:13px; }
+  pre{ background:#f3f4f6; padding:12px; border-radius:8px; overflow:auto; font-size:12px; }
+  .areahead{ font-weight:700; margin:18px 0 4px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <aside class="side">
+    <h2>검토 이력</h2>
+    {% if history %}
+      <div class="hist">
+        {% for h in history %}
+          <a href="{{ url_for('history_view', rec_id=h.id) }}">
+            <div><b>{{ h.school }}</b></div>
+            <div class="meta">{{ h.checkedAt[:16] }} ·
+              <span class="badge res-FAIL">F{{ h.fail }}</span>
+              <span class="badge res-WARN">W{{ h.warn }}</span>
+              <span class="badge res-PASS">P{{ h.pass }}</span>
+            </div>
+          </a>
+        {% endfor %}
+      </div>
+      <div class="meta" style="margin-top:8px;">총 {{ history|length }}건 · <a href="{{ url_for('index') }}">새 검토</a></div>
+    {% else %}
+      <div class="empty">저장된 검토 없음</div>
+    {% endif %}
+  </aside>
+  <main class="main">
+    <div style="display:flex; align-items:baseline; gap:12px; flex-wrap:wrap;">
+      <h1>고등학교 교육과정 자동 검토</h1>
+      <a href="{{ url_for('updates') }}" style="margin-left:auto; font-size:13px;">🔔 업데이트 내역{% if latest_update %} ({{ latest_update }}){% endif %}</a>
+    </div>
+    <div class="cap">2022 개정 교육과정 · 자율점검표 기반</div>
+    {% if latest_update %}
+      <div style="background:#eff6ff; border:1px solid #bfdbfe; color:#1e3a8a; padding:8px 12px; border-radius:8px; font-size:13px; margin-bottom:16px;">
+        🔔 <b>{{ latest_update }}</b> 업데이트가 있습니다. <a href="{{ url_for('updates') }}">변경 내역 보기 →</a>
+      </div>
+    {% endif %}
+    {% block content %}{% endblock %}
+  </main>
+</div>
+</body>
+</html>

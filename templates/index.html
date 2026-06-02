@@ -1,0 +1,19 @@
+{% extends "layout.html" %}
+{% block content %}
+  {% if error %}
+    <div class="err">
+      <b>{{ error }}</b>
+      {% if sheets %}<div style="margin-top:6px;">워크북 시트 목록: {{ sheets|join(', ') }}</div>{% endif %}
+    </div>
+    {% if detail %}<details><summary>오류 상세</summary><pre>{{ detail }}</pre></details>{% endif %}
+  {% endif %}
+
+  <form class="upload" method="post" action="{{ url_for('check') }}" enctype="multipart/form-data">
+    <p style="margin:0 0 14px; color:#374151;">학점 배당표 엑셀 파일(<b>.xlsx</b>)을 업로드하면 자동으로 검토합니다. <b>여러 개 한꺼번에</b> 선택할 수 있어요.</p>
+    <input type="file" name="files" accept=".xlsx" multiple required>
+    <div style="margin-top:16px;">
+      <button class="btn primary" type="submit">검토 시작</button>
+    </div>
+  </form>
+  <p class="cap" style="margin-top:14px;">여러 파일을 넣으면 요약 리포트가 나오고, 파일별 상세 결과로 들어갈 수 있습니다. 왼쪽에서 과거 검토 이력도 볼 수 있어요.</p>
+{% endblock %}

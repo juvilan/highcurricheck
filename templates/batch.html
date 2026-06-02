@@ -1,0 +1,49 @@
+{% extends "layout.html" %}
+{% block content %}
+  {% set okitems = items | selectattr('ok') | list %}
+  {% set failed = okitems | rejectattr('fails', 'equalto', []) | list %}
+  <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+    <h2 style="margin:0; font-size:20px;">일괄 검토 결과 — {{ items|length }}개 파일</h2>
+    <a class="btn" href="{{ url_for('index') }}">새 검토</a>
+  </div>
+  <div class="cap">검토 성공 {{ okitems|length }}개 · FAIL 있는 파일 {{ failed|length }}개</div>
+
+  {% for it in items %}
+    {% if it.ok %}
+      <div class="card" style="margin:12px 0; padding:16px;">
+        <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+          <b style="font-size:16px;">{{ it.school }}</b>
+          <span class="cap" style="margin:0;">{{ it.filename }} · 시트 <code>{{ it.sheet }}</code></span>
+          <span style="margin-left:auto;"></span>
+          <a class="btn" href="{{ url_for('history_view', rec_id=it.id) }}">상세 보기</a>
+          <a class="btn" href="{{ url_for('export_csv', rec_id=it.id) }}">CSV</a>
+        </div>
+        <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
+          {% for k, v in it.counts.items() %}
+            <span style="border:1px solid var(--line); border-radius:6px; padding:4px 10px; font-size:13px;">
+              {{ k }} <b class="res-{{ 'NA' if k == 'N/A' else k }}">{{ v }}</b>
+            </span>
+          {% endfor %}
+        </div>
+        {% if it.fails or it.warns %}
+          <div style="margin-top:10px;">
+            {% for r in it.fails %}
+              <div class="callout fail" style="margin:4px 0;"><b>FAIL · {{ r.id }}</b> {{ r['항목'] }} — {{ r['근거'] }}</div>
+            {% endfor %}
+            {% for r in it.warns %}
+              <div class="callout warn" style="margin:4px 0;"><b>WARN · {{ r.id }}</b> {{ r['항목'] }} — {{ r['근거'] }}</div>
+            {% endfor %}
+          </div>
+        {% else %}
+          <div class="callout ok" style="margin-top:10px;">FAIL/WARN 없음 — 모든 정량 기준 통과.</div>
+        {% endif %}
+      </div>
+    {% else %}
+      <div class="card" style="margin:12px 0; padding:16px; border-color:#fecaca;">
+        <b>{{ it.filename }}</b>
+        <div class="err" style="margin-top:8px;">검토 실패: {{ it.error }}</div>
+        {% if it.sheets %}<div class="cap">워크북 시트 목록: {{ it.sheets|join(', ') }}</div>{% endif %}
+      </div>
+    {% endif %}
+  {% endfor %}
+{% endblock %}
