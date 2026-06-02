@@ -2,6 +2,7 @@
 import os
 import io
 import csv
+import uuid
 import traceback
 from collections import OrderedDict
 from urllib.parse import quote
@@ -18,11 +19,17 @@ app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024  # 16MB 업로드 제한
 UPLOAD_DIR = "/tmp/curri_uploads"
 
+# 일괄검토 결과를 토큰으로 잠깐 보관(PRG용). 뒤로가기/새로고침 시 양식 재제출 방지.
+# 단순 메모리 캐시 — 재시작 시 비워지며, 최근 N개만 유지.
+_BATCH_CACHE = OrderedDict()
+_BATCH_CACHE_MAX = 50
+
 RESULT_ORDER = ["PASS", "FAIL", "WARN", "INFO", "N/A"]
 
 # 업데이트 내역(최신순). 새 기능/수정 시 맨 위에 추가.
 CHANGELOG = [
     {"date": "2026-06-02", "items": [
+        "상세 보기 후 뒤로가기 정상화 — 결과 화면에 '← 뒤로' 버튼 추가, 일괄검토 결과를 GET 페이지로 전환해 뒤로가기/새로고침 시 재검토되던 문제 해결",
         "CSV 내보내기 한글 파일명 오류 수정 — 학교명이 한글인 검토결과 CSV가 받아지지 않던 문제 해결",
         "여러 파일 한꺼번에 업로드(일괄 검토 요약) 지원",
         "[신규] E3 — 비표준 과목(고시외/교육감승인/특목) 비고 표기 검증: 데이터베이스 시트의 정규 과목명 목록과 대조해, 목록에 없는 과목인데 비고가 없으면 경고",
@@ -134,11 +141,22 @@ def check():
             except Exception:
                 pass
 
-    # 단일 파일 + 성공 → 기존 상세 페이지(하위호환), 그 외 → 여러 파일 요약 페이지
+    # PRG: POST 결과를 직접 렌더링하지 않고 GET 페이지로 리다이렉트
+    # (뒤로가기·새로고침 시 양식 재제출/검토 재실행 방지)
     if len(items) == 1 and items[0]["ok"]:
-        it = items[0]
-        return _render_results(it["school"], it["sheet"], it["results"], it["summary"],
-                               debug=it["debug"], saved_id=it["id"])
+        return redirect(url_for("history_view", rec_id=items[0]["id"]))
+    token = uuid.uuid4().hex
+    _BATCH_CACHE[token] = items
+    while len(_BATCH_CACHE) > _BATCH_CACHE_MAX:
+        _BATCH_CACHE.popitem(last=False)
+    return redirect(url_for("batch_view", token=token))
+
+
+@app.route("/batch/<token>")
+def batch_view(token):
+    items = _BATCH_CACHE.get(token)
+    if items is None:  # 재시작 등으로 만료된 토큰
+        return redirect(url_for("index"))
     return render_template("batch.html", history=db.list_checks(limit=200), items=items)
 
 

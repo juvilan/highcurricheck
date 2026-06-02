@@ -1,6 +1,7 @@
 {% extends "layout.html" %}
 {% block content %}
   <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+    <a class="btn" href="#" onclick="if(history.length>1){history.back();return false;}">← 뒤로</a>
     <h2 style="margin:0; font-size:20px;">{{ school }} 검토 결과</h2>
     {% if saved_id %}
       <a class="btn" href="{{ url_for('export_csv', rec_id=saved_id) }}">CSV 다운로드</a>
