@@ -1,0 +1,37 @@
+{% extends "layout.html" %}
+{% block content %}
+  <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+    <h2 style="margin:0; font-size:20px;">검토 이력</h2>
+    <span class="cap" style="margin:0;">총 {{ history|length }}건</span>
+    <a class="btn" href="{{ url_for('index') }}" style="margin-left:auto;">새 검토</a>
+  </div>
+
+  {% if not history %}
+    <div class="callout" style="margin-top:16px;">저장된 검토가 없습니다.</div>
+  {% else %}
+    <table style="margin-top:14px;">
+      <thead><tr>
+        <th>학교</th><th>검토일시</th><th>FAIL</th><th>WARN</th><th>PASS</th>
+        <th>원본</th><th>삭제</th>
+      </tr></thead>
+      <tbody>
+      {% for h in history %}
+        <tr>
+          <td><a href="{{ url_for('history_view', rec_id=h.id) }}"><b>{{ h.school }}</b></a></td>
+          <td>{{ h.checkedAt[:16] }}</td>
+          <td class="res-FAIL">{{ h.fail }}</td>
+          <td class="res-WARN">{{ h.warn }}</td>
+          <td class="res-PASS">{{ h.pass }}</td>
+          <td><a href="{{ url_for('download_original', rec_id=h.id) }}">엑셀</a></td>
+          <td>
+            <form method="post" action="{{ url_for('delete', rec_id=h.id) }}" style="display:inline;"
+                  onsubmit="return confirm('이 검토 기록을 삭제할까요?');">
+              <button class="btn danger" type="submit" style="padding:3px 8px; font-size:12px;">삭제</button>
+            </form>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  {% endif %}
+{% endblock %}

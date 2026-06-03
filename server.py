@@ -24,10 +24,13 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_DIR = "/tmp/curri_uploads"        # 파싱용 임시 저장(처리 후 삭제)
 ORIG_DIR = os.path.join(BASE_DIR, "uploads")  # 원본 엑셀 영구 보관(<rec_id>.xlsx)
 
-# 일괄검토 결과를 토큰으로 잠깐 보관(PRG용). 뒤로가기/새로고침 시 양식 재제출 방지.
-# 단순 메모리 캐시 — 재시작 시 비워지며, 최근 N개만 유지.
-_BATCH_CACHE = OrderedDict()
-_BATCH_CACHE_MAX = 50
+# 방금 검토한 결과(공개)를 토큰으로 잠깐 보관(PRG용). 토큰을 가진(=방금 업로드한)
+# 사람만 접근. 뒤로가기/새로고침 시 양식 재제출 방지. 재시작 시 비워지고 최근 N개만 유지.
+_RESULT_TOKENS = OrderedDict()
+_RESULT_TOKENS_MAX = 50
+
+# 비번이 필요한 경로(저장된 이력·원본 열람/관리). 그 외(검증 등)는 공개.
+PROTECTED_PREFIXES = ("/history", "/original", "/export", "/delete")
 
 # 검토 상세 결과 임시 캐시(즉시 보기/CSV용). DB엔 상세를 저장하지 않으므로
 # 방금 검토한 건만 상세 표를 보여주고, 이후엔 원본 파일로 대체.
@@ -55,7 +58,8 @@ AUTH_PASSWORD = _load_password()
 # 업데이트 내역(최신순). 새 기능/수정 시 맨 위에 추가.
 CHANGELOG = [
     {"date": "2026-06-04", "items": [
-        "비밀번호 접근 제한 추가 — 사이트 전체에 공용 비밀번호 인증 적용",
+        "접근 권한 분리 — 검토(업로드·결과 보기)는 비번 없이 누구나, 저장된 이력 목록·과거 기록 열람·원본 다운로드는 비번 필요",
+        "비밀번호 접근 제한 추가 — 공용 비밀번호 인증",
         "검토 이력에 업로드한 원본 엑셀 파일을 보관(다시 내려받기 가능), 상세 결과 데이터는 더 이상 저장하지 않음",
     ]},
     {"date": "2026-06-02", "items": [
@@ -79,13 +83,22 @@ CHANGELOG = [
 db.init_db()
 
 
+def _is_authed():
+    """비번 일치 여부. 비번 미설정이면 항상 통과."""
+    if AUTH_PASSWORD is None:
+        return True
+    a = request.authorization
+    return bool(a and hmac.compare_digest((a.password or ""), AUTH_PASSWORD))
+
+
 @app.before_request
 def _require_auth():
-    """전 경로 Basic Auth(공용 비밀번호). 비밀번호 미설정 시 제한 없음."""
+    """보호 경로(이력·원본)만 Basic Auth. 검증 등 그 외 경로는 공개."""
     if AUTH_PASSWORD is None:
         return None
-    auth = request.authorization
-    if auth and hmac.compare_digest((auth.password or ""), AUTH_PASSWORD):
+    if not any(request.path.startswith(p) for p in PROTECTED_PREFIXES):
+        return None
+    if _is_authed():
         return None
     resp = Response("인증이 필요합니다.", 401)
     resp.headers["WWW-Authenticate"] = 'Basic realm="curri-check", charset="UTF-8"'
@@ -100,8 +113,11 @@ def _cache_results(rec_id, results):
 
 @app.context_processor
 def _inject_globals():
-    """모든 템플릿에서 최신 업데이트 날짜를 쓸 수 있게 주입."""
-    return {"latest_update": CHANGELOG[0]["date"] if CHANGELOG else ""}
+    """모든 템플릿에서 최신 업데이트 날짜·인증여부를 쓸 수 있게 주입."""
+    return {
+        "latest_update": CHANGELOG[0]["date"] if CHANGELOG else "",
+        "authed": _is_authed(),
+    }
 
 
 def _counts(results):
@@ -196,23 +212,37 @@ def check():
             except Exception:
                 pass
 
-    # PRG: POST 결과를 직접 렌더링하지 않고 GET 페이지로 리다이렉트
-    # (뒤로가기·새로고침 시 양식 재제출/검토 재실행 방지)
-    if len(items) == 1 and items[0]["ok"]:
-        return redirect(url_for("history_view", rec_id=items[0]["id"]))
+    # PRG: POST 결과를 직접 렌더링하지 않고 공개 결과 페이지(토큰)로 리다이렉트.
+    # 토큰을 가진 사람(=방금 업로드한 본인)만 결과를 보며, 비번 없이 열람 가능.
     token = uuid.uuid4().hex
-    _BATCH_CACHE[token] = items
-    while len(_BATCH_CACHE) > _BATCH_CACHE_MAX:
-        _BATCH_CACHE.popitem(last=False)
-    return redirect(url_for("batch_view", token=token))
+    _RESULT_TOKENS[token] = items
+    while len(_RESULT_TOKENS) > _RESULT_TOKENS_MAX:
+        _RESULT_TOKENS.popitem(last=False)
+    return redirect(url_for("result_view", token=token))
 
 
-@app.route("/batch/<token>")
-def batch_view(token):
-    items = _BATCH_CACHE.get(token)
+@app.route("/result/<token>")
+def result_view(token):
+    """방금 검토한 결과(공개). 단일이면 상세, 여러 개면 요약 카드."""
+    items = _RESULT_TOKENS.get(token)
     if items is None:  # 재시작 등으로 만료된 토큰
         return redirect(url_for("index"))
-    return render_template("batch.html", history=db.list_checks(limit=200), items=items)
+    if len(items) == 1 and items[0].get("ok"):
+        it = items[0]
+        return _render_results(it["school"], it["sheet"], it["results"],
+                               it["summary"], debug=it.get("debug"))
+    return render_template("batch.html", items=items, token=token)
+
+
+@app.route("/result/<token>/<int:idx>")
+def result_detail(token, idx):
+    """일괄 결과에서 개별 파일 상세(공개)."""
+    items = _RESULT_TOKENS.get(token)
+    if items is None or idx < 0 or idx >= len(items) or not items[idx].get("ok"):
+        return redirect(url_for("index"))
+    it = items[idx]
+    return _render_results(it["school"], it["sheet"], it["results"],
+                           it["summary"], debug=it.get("debug"))
 
 
 @app.route("/updates")
@@ -220,6 +250,12 @@ def updates():
     latest = CHANGELOG[0]["date"] if CHANGELOG else ""
     return render_template("updates.html", history=db.list_checks(limit=200),
                            changelog=CHANGELOG, latest=latest)
+
+
+@app.route("/history")
+def history_list():
+    """저장된 검토 이력 목록(비번 보호)."""
+    return render_template("history.html", history=db.list_checks(limit=500))
 
 
 @app.route("/history/<rec_id>")
