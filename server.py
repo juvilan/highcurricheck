@@ -3,12 +3,15 @@ import os
 import io
 import csv
 import uuid
+import hmac
+import shutil
 import traceback
 from collections import OrderedDict
 from urllib.parse import quote
 
 from flask import (
-    Flask, request, render_template, redirect, url_for, abort, Response
+    Flask, request, render_template, redirect, url_for, abort, Response,
+    send_file
 )
 
 from parser import parse_curriculum
@@ -17,17 +20,44 @@ import db
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024  # 16MB 업로드 제한
-UPLOAD_DIR = "/tmp/curri_uploads"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+UPLOAD_DIR = "/tmp/curri_uploads"        # 파싱용 임시 저장(처리 후 삭제)
+ORIG_DIR = os.path.join(BASE_DIR, "uploads")  # 원본 엑셀 영구 보관(<rec_id>.xlsx)
 
 # 일괄검토 결과를 토큰으로 잠깐 보관(PRG용). 뒤로가기/새로고침 시 양식 재제출 방지.
 # 단순 메모리 캐시 — 재시작 시 비워지며, 최근 N개만 유지.
 _BATCH_CACHE = OrderedDict()
 _BATCH_CACHE_MAX = 50
 
+# 검토 상세 결과 임시 캐시(즉시 보기/CSV용). DB엔 상세를 저장하지 않으므로
+# 방금 검토한 건만 상세 표를 보여주고, 이후엔 원본 파일로 대체.
+_RESULT_CACHE = OrderedDict()
+_RESULT_CACHE_MAX = 50
+
 RESULT_ORDER = ["PASS", "FAIL", "WARN", "INFO", "N/A"]
+
+
+def _load_password():
+    """접근 비밀번호: 환경변수 CURRI_PASSWORD 우선, 없으면 .auth_password 파일."""
+    pw = os.environ.get("CURRI_PASSWORD")
+    if pw and pw.strip():
+        return pw.strip()
+    path = os.path.join(BASE_DIR, ".auth_password")
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as fh:
+            val = fh.read().strip()
+            return val or None
+    return None
+
+
+AUTH_PASSWORD = _load_password()
 
 # 업데이트 내역(최신순). 새 기능/수정 시 맨 위에 추가.
 CHANGELOG = [
+    {"date": "2026-06-04", "items": [
+        "비밀번호 접근 제한 추가 — 사이트 전체에 공용 비밀번호 인증 적용",
+        "검토 이력에 업로드한 원본 엑셀 파일을 보관(다시 내려받기 가능), 상세 결과 데이터는 더 이상 저장하지 않음",
+    ]},
     {"date": "2026-06-02", "items": [
         "상세 보기 후 뒤로가기 정상화 — 결과 화면에 '← 뒤로' 버튼 추가, 일괄검토 결과를 GET 페이지로 전환해 뒤로가기/새로고침 시 재검토되던 문제 해결",
         "CSV 내보내기 한글 파일명 오류 수정 — 학교명이 한글인 검토결과 CSV가 받아지지 않던 문제 해결",
@@ -49,6 +79,25 @@ CHANGELOG = [
 db.init_db()
 
 
+@app.before_request
+def _require_auth():
+    """전 경로 Basic Auth(공용 비밀번호). 비밀번호 미설정 시 제한 없음."""
+    if AUTH_PASSWORD is None:
+        return None
+    auth = request.authorization
+    if auth and hmac.compare_digest((auth.password or ""), AUTH_PASSWORD):
+        return None
+    resp = Response("인증이 필요합니다.", 401)
+    resp.headers["WWW-Authenticate"] = 'Basic realm="curri-check", charset="UTF-8"'
+    return resp
+
+
+def _cache_results(rec_id, results):
+    _RESULT_CACHE[rec_id] = results
+    while len(_RESULT_CACHE) > _RESULT_CACHE_MAX:
+        _RESULT_CACHE.popitem(last=False)
+
+
 @app.context_processor
 def _inject_globals():
     """모든 템플릿에서 최신 업데이트 날짜를 쓸 수 있게 주입."""
@@ -67,7 +116,8 @@ def _grouped(results):
     return list(by_area.items())
 
 
-def _render_results(school, sheet, results, summary, debug=None, saved_id=None):
+def _render_results(school, sheet, results, summary, debug=None, saved_id=None,
+                    counts=None, origname=None):
     return render_template(
         "results.html",
         history=db.list_checks(limit=200),
@@ -75,12 +125,13 @@ def _render_results(school, sheet, results, summary, debug=None, saved_id=None):
         sheet=sheet,
         results=results,
         summary=summary,
-        counts=_counts(results),
+        counts=counts if counts is not None else _counts(results),
         fails=[r for r in results if r["결과"] == "FAIL"],
         warns=[r for r in results if r["결과"] == "WARN"],
         grouped=_grouped(results),
         debug=debug,
         saved_id=saved_id,
+        origname=origname,
     )
 
 
@@ -105,6 +156,7 @@ def check():
                                error="`.xlsx` 파일만 업로드할 수 있습니다: " + ", ".join(bad))
 
     os.makedirs(UPLOAD_DIR, exist_ok=True)
+    os.makedirs(ORIG_DIR, exist_ok=True)
     items = []
     for f in files:
         safe_name = f.filename.replace("/", "_").replace("\\", "_")
@@ -115,7 +167,10 @@ def check():
             results = check_curriculum(parsed)
             counts = _counts(results)
             rec_id = db.save_check(parsed["school"], parsed["sheet"], counts,
-                                   parsed["summary"], results)
+                                   parsed["summary"], f.filename)
+            # 원본 엑셀을 영구 보관(상세 결과 대신)
+            shutil.copyfile(tmp_path, os.path.join(ORIG_DIR, rec_id + ".xlsx"))
+            _cache_results(rec_id, results)
             items.append({
                 "ok": True, "filename": f.filename, "school": parsed["school"],
                 "sheet": parsed["sheet"], "counts": counts, "id": rec_id,
@@ -172,13 +227,38 @@ def history_view(rec_id):
     rec = db.get_check(rec_id)
     if not rec:
         abort(404)
-    return _render_results(rec["school"], rec["sheet"], rec["results"],
-                           rec["summary"], saved_id=rec_id)
+    # 상세 결과는 보관하지 않으므로, 방금 검토한 건(캐시)만 상세 표를 보여주고
+    # 그 외에는 DB의 카운트만 표시 + 원본 다운로드로 안내.
+    results = _RESULT_CACHE.get(rec_id, [])
+    counts = None if results else OrderedDict(
+        (k, rec[c]) for k, c in
+        [("PASS", "pass"), ("FAIL", "fail"), ("WARN", "warn"),
+         ("INFO", "info"), ("N/A", "na")]
+    )
+    return _render_results(rec["school"], rec["sheet"], results,
+                           rec["summary"], saved_id=rec_id, counts=counts,
+                           origname=rec.get("origname"))
+
+
+@app.route("/original/<rec_id>.xlsx")
+def download_original(rec_id):
+    rec = db.get_check(rec_id)
+    if not rec or not rec.get("origname"):
+        abort(404)
+    path = os.path.join(ORIG_DIR, rec_id + ".xlsx")
+    if not os.path.exists(path):
+        abort(404)
+    return send_file(path, as_attachment=True, download_name=rec["origname"])
 
 
 @app.route("/delete/<rec_id>", methods=["POST"])
 def delete(rec_id):
     db.delete_check(rec_id)
+    _RESULT_CACHE.pop(rec_id, None)
+    try:
+        os.unlink(os.path.join(ORIG_DIR, rec_id + ".xlsx"))
+    except OSError:
+        pass
     return redirect(url_for("index"))
 
 
@@ -187,7 +267,9 @@ def export_csv(rec_id):
     rec = db.get_check(rec_id)
     if not rec:
         abort(404)
-    results = rec["results"]
+    results = _RESULT_CACHE.get(rec_id) or rec["results"]
+    if not results:  # 상세 미보관 → 원본 파일로 대체
+        return redirect(url_for("download_original", rec_id=rec_id))
     cols = ["id", "영역", "항목", "기준", "측정값", "결과", "근거"]
     buf = io.StringIO()
     buf.write("﻿")  # Excel 한글용 BOM

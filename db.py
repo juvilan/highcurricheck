@@ -29,21 +29,27 @@ def init_db():
                 info      INTEGER,
                 na        INTEGER,
                 summary   TEXT,
-                results   TEXT
+                results   TEXT,
+                origname  TEXT
             )
             """
         )
+        # 구 DB 호환: origname 컬럼이 없으면 추가
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(checks)").fetchall()]
+        if "origname" not in cols:
+            conn.execute("ALTER TABLE checks ADD COLUMN origname TEXT")
 
 
-def save_check(school, sheet, counts, summary, results):
-    """검토 1건 저장. counts는 {'PASS':n,'FAIL':n,'WARN':n,'INFO':n,'N/A':n}."""
+def save_check(school, sheet, counts, summary, origname):
+    """검토 1건 저장. counts는 {'PASS':n,'FAIL':n,'WARN':n,'INFO':n,'N/A':n}.
+    상세 결과(results)는 보관하지 않고 원본 파일(origname)로 대체한다."""
     rec_id = uuid.uuid4().hex
     with get_conn() as conn:
         conn.execute(
             """
             INSERT INTO checks
-                (id, school, sheet, checkedAt, pass, fail, warn, info, na, summary, results)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                (id, school, sheet, checkedAt, pass, fail, warn, info, na, summary, results, origname)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 rec_id,
@@ -56,7 +62,8 @@ def save_check(school, sheet, counts, summary, results):
                 int(counts.get("INFO", 0)),
                 int(counts.get("N/A", 0)),
                 json.dumps(summary, ensure_ascii=False),
-                json.dumps(results, ensure_ascii=False),
+                "[]",  # 상세 결과는 저장하지 않음
+                origname,
             ),
         )
     return rec_id

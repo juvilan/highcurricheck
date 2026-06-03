@@ -4,7 +4,12 @@
     <a class="btn" href="#" onclick="if(history.length>1){history.back();return false;}">← 뒤로</a>
     <h2 style="margin:0; font-size:20px;">{{ school }} 검토 결과</h2>
     {% if saved_id %}
-      <a class="btn" href="{{ url_for('export_csv', rec_id=saved_id) }}">CSV 다운로드</a>
+      {% if origname %}
+        <a class="btn" href="{{ url_for('download_original', rec_id=saved_id) }}">원본 엑셀 다운로드</a>
+      {% endif %}
+      {% if results %}
+        <a class="btn" href="{{ url_for('export_csv', rec_id=saved_id) }}">CSV 다운로드</a>
+      {% endif %}
       <form method="post" action="{{ url_for('delete', rec_id=saved_id) }}" style="display:inline;"
             onsubmit="return confirm('이 검토 기록을 삭제할까요?');">
         <button class="btn danger" type="submit">이 검토 삭제</button>
@@ -23,6 +28,12 @@
     {% endfor %}
   </div>
 
+  {% if not results %}
+    <div class="callout" style="margin-top:16px;">
+      상세 항목은 따로 보관하지 않습니다. 위 <b>‘원본 엑셀 다운로드’</b>로 파일을 받아 확인하세요.
+      (위 카운트는 검토 당시 집계값입니다.)
+    </div>
+  {% else %}
   <h3>주요 발견 사항</h3>
   {% if not fails and not warns %}
     <div class="callout ok">FAIL/WARN 항목 없음. 모든 정량 기준 통과.</div>
@@ -64,4 +75,5 @@ summary: {{ summary }}
 {% if debug %}{% for k, v in debug.items() %}{{ k }}: {{ v }}
 {% endfor %}{% endif %}</pre>
   </details>
+  {% endif %}
 {% endblock %}

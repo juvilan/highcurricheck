@@ -4,3 +4,5 @@ __pycache__/
 checks.db
 .DS_Store
 /tmp/
+uploads/
+.auth_password
