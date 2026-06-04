@@ -159,26 +159,49 @@ def _inject_globals():
 
 # 파일명에서 학교 표시명을 뽑을 때 "설명" 구간으로 보고 제외할 키워드
 _DESC_KEYWORDS = ("학점", "배당", "교육과정", "입학생", "학년도", "편제", "개정", "배당표", "점검")
+_OFFICE_RE = re.compile(r"교육지원청|교육청")
+# 학교명처럼 보이는(접미사로 끝나는) 구간만 인식 — '보고/고시' 같은 부분일치 방지
+_SCHOOL_SUFFIX = re.compile(
+    r"(여자고등학교|여자중학교|남자고등학교|남자중학교|고등학교|중학교|초등학교"
+    r"|과학고|외국어고|국제고|예술고|체육고|여고|여중|남고|남중|[가-힣]고|[가-힣]중|[가-힣]초)$"
+)
+# 학교명처럼 끝나지만 학교가 아닌 흔한 단어
+_NOISE_NAMES = {
+    "보고", "중간보고", "보고서", "참고", "비고", "사고", "광고", "신고", "경고",
+    "권고", "충고", "고시", "원고", "최고", "상고", "재고", "예고", "공고", "통고",
+}
+_REVISION_YEARS = {"2009", "2011", "2015", "2022"}  # 교육과정 개정 연도(학년도 아님)
 
 
 def _display_school(filename):
-    """파일명에서 '약칭학교명 + 학년도'를 추출. 예) 서울특별시교육청_광영여자고등학교_
-    2026학년도 ... _광영여고.xlsx → '광영여고 2026'."""
-    stem = os.path.splitext(os.path.basename(filename or ""))[0]
-    m = re.search(r"(20\d{2})\s*학년도", stem) or re.search(r"(20\d{2})", stem)
-    year = m.group(1) if m else ""
-    parts = [p.strip() for p in stem.split("_") if p.strip()]
-    parts = [p for p in parts if "교육청" not in p]  # 행정기관 구간 제외
-    # 학교명처럼 보이는(고/중/초/학교 포함) + 설명 아닌 구간 중 약칭(짧은 쪽) 우선
-    names = [p for p in parts
-             if any(k in p for k in ("고", "중", "초", "학교"))
-             and not any(k in p for k in _DESC_KEYWORDS)]
-    if names:
-        school = min(names, key=len)
-    elif parts:
-        school = min(parts, key=len)
+    """파일명에서 '학교명(약칭 우선) + 학년도'를 추출. 예) 서울특별시교육청_
+    광영여자고등학교_2026학년도 ... _광영여고.xlsx → '광영여고 2026'."""
+    stem = os.path.splitext(os.path.basename(filename or ""))[0].strip()
+    # 연도: '20NN학년도' 우선, 없으면 개정연도를 뺀 첫 4자리 연도
+    m = re.search(r"(20\d{2})\s*학년도", stem)
+    if m:
+        year = m.group(1)
     else:
-        school = stem or "업로드 파일"
+        ys = [y for y in re.findall(r"20\d{2}", stem) if y not in _REVISION_YEARS]
+        year = ys[0] if ys else ""
+    # '_' 또는 '-'로 구간 분리 + 구간 안의 교육청 표기 제거
+    segs = []
+    for s in re.split(r"[_\-]+", stem):
+        s = _OFFICE_RE.sub("", s).strip()
+        if s:
+            segs.append(s)
+    # 학교 접미사로 끝나고, 노이즈/설명이 아닌 구간 → 약칭(짧은 쪽) 우선
+    cands = [s for s in segs
+             if _SCHOOL_SUFFIX.search(s)
+             and s not in _NOISE_NAMES
+             and not any(k in s for k in _DESC_KEYWORDS)]
+    if cands:
+        school = min(cands, key=len)
+    else:
+        school = next((s for s in segs
+                       if not any(k in s for k in _DESC_KEYWORDS)
+                       and not re.fullmatch(r"20\d{2}.*", s)), None) or (segs[0] if segs else "")
+    school = school or "업로드 파일"
     return (school + (" " + year if year else "")).strip()
 
 
