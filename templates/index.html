@@ -72,7 +72,8 @@
       form.addEventListener('submit', function (e) {
         var n = input.files ? input.files.length : 0;
         if (!n) { e.preventDefault(); alert('검토할 .xlsx 파일을 선택해 주세요.'); return; }
-        if (n > MAX) { e.preventDefault(); alert('한 번에 최대 ' + MAX + '개까지 가능합니다. 지금 ' + n + '개입니다.'); }
+        if (n > MAX) { e.preventDefault(); alert('한 번에 최대 ' + MAX + '개까지 가능합니다. 지금 ' + n + '개입니다.'); return; }
+        if (window.showLoading) showLoading('검토 중… (' + n + '개 파일) 잠시만 기다려 주세요.');
       });
     })();
   </script>

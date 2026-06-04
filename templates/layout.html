@@ -41,6 +41,11 @@
   details{ margin-top:16px; } summary{ cursor:pointer; color:var(--muted); font-size:13px; }
   pre{ background:#f3f4f6; padding:12px; border-radius:8px; overflow:auto; font-size:12px; }
   .areahead{ font-weight:700; margin:18px 0 4px; }
+  #loading-overlay{ display:none; position:fixed; inset:0; background:rgba(249,250,251,.85);
+    z-index:9999; align-items:center; justify-content:center; flex-direction:column; gap:16px; }
+  .spinner{ width:46px; height:46px; border:5px solid #dbeafe; border-top-color:#1d4ed8;
+    border-radius:50%; animation:spin .8s linear infinite; }
+  @keyframes spin{ to{ transform:rotate(360deg); } }
 </style>
 </head>
 <body>
@@ -89,5 +94,22 @@
     {% block content %}{% endblock %}
   </main>
 </div>
+<div id="loading-overlay">
+  <div class="spinner"></div>
+  <div id="loading-msg" style="font-size:15px; color:#374151;">처리 중…</div>
+</div>
+<script>
+  window.showLoading = function (msg) {
+    var o = document.getElementById('loading-overlay');
+    if (!o) return;
+    if (msg) document.getElementById('loading-msg').textContent = msg;
+    o.style.display = 'flex';
+  };
+  // pageshow: 뒤로가기로 돌아오면 오버레이 숨김(bfcache 대비)
+  window.addEventListener('pageshow', function () {
+    var o = document.getElementById('loading-overlay');
+    if (o) o.style.display = 'none';
+  });
+</script>
 </body>
 </html>

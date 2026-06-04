@@ -40,7 +40,8 @@
       <b>‘원본 엑셀 다운로드’</b>로 파일을 받아 확인하세요. (위 카운트는 검토 당시 집계값입니다.)
     </div>
     {% if saved_id and origname %}
-      <form method="post" action="{{ url_for('recheck', rec_id=saved_id) }}" style="margin-top:10px;">
+      <form method="post" action="{{ url_for('recheck', rec_id=saved_id) }}" style="margin-top:10px;"
+            onsubmit="if(window.showLoading)showLoading('다시 검토 중…');">
         <button class="btn primary" type="submit">보관된 원본으로 다시 검토</button>
       </form>
     {% endif %}
