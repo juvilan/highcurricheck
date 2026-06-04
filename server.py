@@ -6,6 +6,7 @@ import csv
 import uuid
 import hmac
 import shutil
+import threading
 import traceback
 from collections import OrderedDict
 from urllib.parse import quote
@@ -35,6 +36,9 @@ _RESULT_TOKENS_MAX = 50
 # 방금 검토한 건만 상세 표를 보여주고, 이후엔 원본 파일로 대체.
 _RESULT_CACHE = OrderedDict()
 _RESULT_CACHE_MAX = 50
+
+# waitress 멀티스레드에서 위 메모리 캐시/토큰의 set+evict 경쟁(KeyError) 방지용 락
+_cache_lock = threading.Lock()
 
 RESULT_ORDER = ["PASS", "FAIL", "WARN", "INFO", "N/A"]
 
@@ -79,6 +83,7 @@ app.secret_key = _load_secret()
 # 업데이트 내역(최신순). 새 기능/수정 시 맨 위에 추가.
 CHANGELOG = [
     {"date": "2026-06-04", "items": [
+        "동시 사용 안정성 개선 — 여러 명이 동시에 검토·열람해도 안전하도록 처리(SQLite WAL/대기시간, 메모리 캐시 잠금). 사용자 삭제 시 그 검토 기록은 마스터로 귀속(같은 이름 재가입자가 남의 기록을 보던 문제 차단).",
         "검토 이력 학교명 표시 개선 — 파일명에서 학교 약칭과 학년도를 뽑아 ‘광영여고 2026’처럼 표시(이전엔 ‘서울특별시교육청’으로 나오던 문제)",
         "로그인 기능 도입 — 실명·비밀번호로 로그인(처음 이름은 바로 가입, 승인 불필요). 자기가 올려 검토한 자료만 열람·삭제, 마스터는 전체 열람·삭제와 사용자 관리.",
         "이력 상세에 ‘다시 검토’ 버튼 — 보관된 원본으로 즉석 재검토해 과거 검토의 상세 결과를 다시 볼 수 있음",
@@ -129,9 +134,17 @@ def _require_login():
 
 
 def _cache_results(rec_id, results):
-    _RESULT_CACHE[rec_id] = results
-    while len(_RESULT_CACHE) > _RESULT_CACHE_MAX:
-        _RESULT_CACHE.popitem(last=False)
+    with _cache_lock:
+        _RESULT_CACHE[rec_id] = results
+        while len(_RESULT_CACHE) > _RESULT_CACHE_MAX:
+            _RESULT_CACHE.popitem(last=False)
+
+
+def _store_token(token, items):
+    with _cache_lock:
+        _RESULT_TOKENS[token] = items
+        while len(_RESULT_TOKENS) > _RESULT_TOKENS_MAX:
+            _RESULT_TOKENS.popitem(last=False)
 
 
 @app.context_processor
@@ -256,9 +269,11 @@ def admin_users():
 
 @app.route("/admin/reject/<username>", methods=["POST"])
 def admin_reject(username):
-    """사용자 삭제(마스터 전용). 해당 사용자의 검토 기록은 남음."""
+    """사용자 삭제(마스터 전용). 검토 기록은 마스터로 귀속시켜, 같은 이름
+    재가입자가 옛 기록을 상속받지 않게 한다."""
     _require_master()
     if username != MASTER_USERNAME:
+        db.reassign_owner(username, MASTER_USERNAME)
         db.delete_user(username)
     return redirect(url_for("admin_users"))
 
@@ -329,9 +344,7 @@ def check():
     if len(items) == 1 and items[0].get("ok"):
         return redirect(url_for("history_view", rec_id=items[0]["id"]))
     token = uuid.uuid4().hex
-    _RESULT_TOKENS[token] = items
-    while len(_RESULT_TOKENS) > _RESULT_TOKENS_MAX:
-        _RESULT_TOKENS.popitem(last=False)
+    _store_token(token, items)
     return redirect(url_for("result_view", token=token))
 
 

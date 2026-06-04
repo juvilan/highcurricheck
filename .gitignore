@@ -2,6 +2,7 @@
 __pycache__/
 *.pyc
 checks.db
+checks.db-*
 .DS_Store
 /tmp/
 uploads/

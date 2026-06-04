@@ -9,8 +9,12 @@ DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "checks.db")
 
 
 def get_conn():
-    conn = sqlite3.connect(DB_PATH)
+    # timeout: 쓰기 잠금 대기(동시 업로드/삭제 시 'database is locked' 방지)
+    conn = sqlite3.connect(DB_PATH, timeout=30)
     conn.row_factory = sqlite3.Row
+    # WAL: 읽기-쓰기 동시성 향상(여러 스레드가 동시에 읽는 중에도 쓰기 가능)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=30000")
     return conn
 
 
@@ -92,6 +96,13 @@ def approve_user(username):
 def delete_user(username):
     with get_conn() as conn:
         conn.execute("DELETE FROM users WHERE username = ?", (username,))
+
+
+def reassign_owner(old_owner, new_owner):
+    """검토 기록 소유자 일괄 변경. 사용자 삭제 시 그 기록을 마스터로 귀속시켜,
+    같은 이름으로 재가입한 사람이 옛 기록을 상속받지 않도록 한다."""
+    with get_conn() as conn:
+        conn.execute("UPDATE checks SET owner = ? WHERE owner = ?", (new_owner, old_owner))
 
 
 def save_check(school, sheet, counts, summary, origname, owner=None):
