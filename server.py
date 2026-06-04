@@ -83,7 +83,7 @@ app.secret_key = _load_secret()
 # 업데이트 내역(최신순). 새 기능/수정 시 맨 위에 추가.
 CHANGELOG = [
     {"date": "2026-06-04", "items": [
-        "다운로드 파일명을 ‘학년도_학교’ 순으로 정리 — 원본은 ‘2026_광영여고.xlsx’, CSV는 ‘2026_광영여고_검토결과.csv’ 형식(연도순 정렬 편의).",
+        "검토 이력·결과 표시와 다운로드 파일명을 ‘학년도_학교’ 순으로 통일 — 예: ‘2026_광영여고’, 원본 ‘2026_광영여고.xlsx’, CSV ‘2026_광영여고_검토결과.csv’(연도순 정렬 편의).",
         "동시 사용 안정성 개선 — 여러 명이 동시에 검토·열람해도 안전하도록 처리(SQLite WAL/대기시간, 메모리 캐시 잠금). 사용자 삭제 시 그 검토 기록은 마스터로 귀속(같은 이름 재가입자가 남의 기록을 보던 문제 차단).",
         "검토 이력 학교명 표시 개선 — 파일명에서 학교 약칭과 학년도를 뽑아 ‘광영여고 2026’처럼 표시(이전엔 ‘서울특별시교육청’으로 나오던 문제)",
         "로그인 기능 도입 — 실명·비밀번호로 로그인(처음 이름은 바로 가입, 승인 불필요). 자기가 올려 검토한 자료만 열람·삭제, 마스터는 전체 열람·삭제와 사용자 관리.",
@@ -175,8 +175,8 @@ _REVISION_YEARS = {"2009", "2011", "2015", "2022"}  # 교육과정 개정 연도
 
 
 def _display_school(filename):
-    """파일명에서 '학교명(약칭 우선) + 학년도'를 추출. 예) 서울특별시교육청_
-    광영여자고등학교_2026학년도 ... _광영여고.xlsx → '광영여고 2026'."""
+    """파일명에서 '학년도_학교명(약칭 우선)'을 추출. 예) 서울특별시교육청_
+    광영여자고등학교_2026학년도 ... _광영여고.xlsx → '2026_광영여고'."""
     stem = os.path.splitext(os.path.basename(filename or ""))[0].strip()
     # 연도: '20NN학년도' 우선, 없으면 개정연도를 뺀 첫 4자리 연도
     m = re.search(r"(20\d{2})\s*학년도", stem)
@@ -203,7 +203,7 @@ def _display_school(filename):
                        if not any(k in s for k in _DESC_KEYWORDS)
                        and not re.fullmatch(r"20\d{2}.*", s)), None) or (segs[0] if segs else "")
     school = school or "업로드 파일"
-    return (school + (" " + year if year else "")).strip()
+    return f"{year}_{school}" if year else school
 
 
 def _filename_base(school):
