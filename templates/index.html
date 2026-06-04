@@ -8,12 +8,72 @@
     {% if detail %}<details><summary>오류 상세</summary><pre>{{ detail }}</pre></details>{% endif %}
   {% endif %}
 
-  <form class="upload" method="post" action="{{ url_for('check') }}" enctype="multipart/form-data">
-    <p style="margin:0 0 14px; color:#374151;">학점 배당표 엑셀 파일(<b>.xlsx</b>)을 업로드하면 자동으로 검토합니다. <b>여러 개 한꺼번에</b> 선택할 수 있어요.</p>
-    <input type="file" name="files" accept=".xlsx" multiple required>
-    <div style="margin-top:16px;">
+  <form id="up-form" method="post" action="{{ url_for('check') }}" enctype="multipart/form-data">
+    <p style="margin:0 0 14px; color:#374151;">학점 배당표 엑셀 파일(<b>.xlsx</b>)을 업로드하면 자동으로 검토합니다. <b>여러 개 한꺼번에</b> 가능해요.</p>
+
+    <label id="drop" class="upload" style="display:block; cursor:pointer;">
+      <input id="files" type="file" name="files" accept=".xlsx" multiple style="display:none;">
+      <div style="font-size:34px; line-height:1;">📂</div>
+      <div id="drop-msg" style="margin-top:10px; color:#374151;">
+        <b>여기로 파일을 끌어다 놓거나</b>, 눌러서 선택하세요
+      </div>
+      <div class="cap" style="margin-top:8px;">.xlsx · 한 번에 최대 {{ max_files }}개 (총 {{ max_mb }}MB)</div>
+    </label>
+
+    <div style="margin-top:16px; display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
       <button class="btn primary" type="submit">검토 시작</button>
+      <span id="count" class="cap" style="margin:0;"></span>
     </div>
   </form>
   <p class="cap" style="margin-top:14px;">여러 파일을 넣으면 요약 리포트가 나오고, 파일별 상세 결과로 들어갈 수 있습니다. 왼쪽에서 과거 검토 이력도 볼 수 있어요.</p>
+
+  <style>
+    #drop.drag { border-color:#1d4ed8; background:#eff6ff; }
+    #drop:hover { border-color:#9ca3af; }
+  </style>
+  <script>
+    (function () {
+      var MAX = {{ max_files }};
+      var drop = document.getElementById('drop');
+      var input = document.getElementById('files');
+      var count = document.getElementById('count');
+      var form = document.getElementById('up-form');
+
+      function update() {
+        var n = input.files ? input.files.length : 0;
+        if (!n) { count.textContent = ''; count.style.color = ''; return; }
+        count.textContent = '선택됨: ' + n + '개';
+        count.style.color = (n > MAX) ? '#b91c1c' : '';
+        if (n > MAX) count.textContent += ' — 최대 ' + MAX + '개까지!';
+      }
+      input.addEventListener('change', update);
+
+      ['dragenter','dragover'].forEach(function (ev) {
+        drop.addEventListener(ev, function (e) { e.preventDefault(); e.stopPropagation(); drop.classList.add('drag'); });
+      });
+      ['dragleave','drop'].forEach(function (ev) {
+        drop.addEventListener(ev, function (e) { e.preventDefault(); e.stopPropagation(); drop.classList.remove('drag'); });
+      });
+      drop.addEventListener('drop', function (e) {
+        var dropped = e.dataTransfer && e.dataTransfer.files ? e.dataTransfer.files : null;
+        if (!dropped || !dropped.length) return;
+        // .xlsx만 추려서 input에 담기
+        var dt = new DataTransfer();
+        var skipped = 0;
+        for (var i = 0; i < dropped.length; i++) {
+          if (dropped[i].name.toLowerCase().endsWith('.xlsx')) dt.items.add(dropped[i]);
+          else skipped++;
+        }
+        input.files = dt.files;
+        update();
+        if (skipped) count.textContent += ' (.xlsx 아닌 ' + skipped + '개 제외)';
+      });
+
+      form.addEventListener('submit', function (e) {
+        var n = input.files ? input.files.length : 0;
+        if (!n) { e.preventDefault(); alert('검토할 .xlsx 파일을 선택해 주세요.'); return; }
+        if (n > MAX) { e.preventDefault(); alert('한 번에 최대 ' + MAX + '개까지 가능합니다. 지금 ' + n + '개입니다.'); }
+      });
+    })();
+  </script>
 {% endblock %}

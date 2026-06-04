@@ -22,7 +22,9 @@ from checker import check_curriculum
 import db
 
 app = Flask(__name__)
-app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024  # 16MB 업로드 제한
+MAX_FILES = 100                                   # 한 번에 올릴 수 있는 파일 수
+MAX_UPLOAD_MB = 40                                 # 한 번 요청 총 용량(MB) — 100개(관측 ~0.36MB/개) 여유 포함
+app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_MB * 1024 * 1024
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_DIR = "/tmp/curri_uploads"        # 파싱용 임시 저장(처리 후 삭제)
 ORIG_DIR = os.path.join(BASE_DIR, "uploads")  # 원본 엑셀 영구 보관(<rec_id>.xlsx)
@@ -35,7 +37,7 @@ _RESULT_TOKENS_MAX = 50
 # 검토 상세 결과 임시 캐시(즉시 보기/CSV용). DB엔 상세를 저장하지 않으므로
 # 방금 검토한 건만 상세 표를 보여주고, 이후엔 원본 파일로 대체.
 _RESULT_CACHE = OrderedDict()
-_RESULT_CACHE_MAX = 50
+_RESULT_CACHE_MAX = 200  # 대용량 일괄검토(최대 100개)에서도 상세 캐시 유지
 
 # waitress 멀티스레드에서 위 메모리 캐시/토큰의 set+evict 경쟁(KeyError) 방지용 락
 _cache_lock = threading.Lock()
@@ -83,6 +85,7 @@ app.secret_key = _load_secret()
 # 업데이트 내역(최신순). 새 기능/수정 시 맨 위에 추가.
 CHANGELOG = [
     {"date": "2026-06-04", "items": [
+        "업로드 편의 개선 — 드래그앤드롭 지원, 선택 개수 표시, 한 번에 최대 100개(총 40MB) 안내. 한도 초과 시 깨진 화면 대신 안내 메시지(이전 16MB 제한에서 상향).",
         "검토 이력·결과 표시와 다운로드 파일명을 ‘학년도_학교’ 순으로 통일 — 예: ‘2026_광영여고’, 원본 ‘2026_광영여고.xlsx’, CSV ‘2026_광영여고_검토결과.csv’(연도순 정렬 편의).",
         "동시 사용 안정성 개선 — 여러 명이 동시에 검토·열람해도 안전하도록 처리(SQLite WAL/대기시간, 메모리 캐시 잠금). 사용자 삭제 시 그 검토 기록은 마스터로 귀속(같은 이름 재가입자가 남의 기록을 보던 문제 차단).",
         "검토 이력 학교명 표시 개선 — 파일명에서 학교 약칭과 학년도를 뽑아 ‘광영여고 2026’처럼 표시(이전엔 ‘서울특별시교육청’으로 나오던 문제)",
@@ -134,6 +137,18 @@ def _require_login():
     return None
 
 
+@app.errorhandler(413)
+def _too_large(e):
+    """업로드 총용량 초과 — 깨진 기본 페이지 대신 안내."""
+    try:
+        return render_template(
+            "index.html", history=_sidebar_history(),
+            error=f"업로드 용량이 너무 큽니다(한 번에 총 {MAX_UPLOAD_MB}MB까지). "
+                  f"파일 수를 줄여 나눠서 올려 주세요."), 413
+    except Exception:
+        return (f"업로드 용량 초과: 한 번에 총 {MAX_UPLOAD_MB}MB까지 가능합니다.", 413)
+
+
 def _cache_results(rec_id, results):
     with _cache_lock:
         _RESULT_CACHE[rec_id] = results
@@ -155,6 +170,8 @@ def _inject_globals():
         "latest_update": CHANGELOG[0]["date"] if CHANGELOG else "",
         "user": current_user(),
         "is_master": is_master(),
+        "max_files": MAX_FILES,
+        "max_mb": MAX_UPLOAD_MB,
     }
 
 
@@ -329,6 +346,12 @@ def check():
             files = [f]
     if not files:
         return redirect(url_for("index"))
+
+    if len(files) > MAX_FILES:
+        return render_template(
+            "index.html", history=_sidebar_history(),
+            error=f"한 번에 최대 {MAX_FILES}개까지 검토할 수 있어요. "
+                  f"지금 {len(files)}개를 선택했습니다 — 나눠서 올려 주세요.")
 
     bad = [f.filename for f in files if not f.filename.lower().endswith(".xlsx")]
     if bad:
