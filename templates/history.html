@@ -1,8 +1,9 @@
 {% extends "layout.html" %}
 {% block content %}
+  {% set fail_n = history | selectattr('fail') | list | length %}
   <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
     <h2 style="margin:0; font-size:20px;">검토 이력</h2>
-    <span class="cap" style="margin:0;">총 {{ history|length }}건</span>
+    <span class="cap" style="margin:0;">총 {{ history|length }}건{% if fail_n %} · <span style="color:#b91c1c; font-weight:700;">❌ FAIL {{ fail_n }}건</span>{% endif %}</span>
     <a class="btn" href="{{ url_for('index') }}" style="margin-left:auto;">새 검토</a>
   </div>
 
@@ -11,16 +12,17 @@
   {% else %}
     <table style="margin-top:14px;">
       <thead><tr>
-        <th>학교</th>{% if is_master %}<th>작성자</th>{% endif %}<th>검토일시</th><th>FAIL</th><th>WARN</th><th>PASS</th>
+        <th>상태</th><th>학교</th>{% if is_master %}<th>작성자</th>{% endif %}<th>검토일시</th><th>FAIL</th><th>WARN</th><th>PASS</th>
         <th>원본</th><th>삭제</th>
       </tr></thead>
       <tbody>
       {% for h in history %}
-        <tr>
+        <tr{% if h.fail %} style="background:#fef2f2;"{% endif %}>
+          <td style="text-align:center; font-size:16px;">{% if h.fail %}❌{% else %}✅{% endif %}</td>
           <td><a href="{{ url_for('history_view', rec_id=h.id) }}"><b>{{ h.school }}</b></a></td>
           {% if is_master %}<td>{{ h.owner or '—' }}</td>{% endif %}
           <td>{{ h.checkedAt[:16] }}</td>
-          <td class="res-FAIL">{{ h.fail }}</td>
+          <td class="res-FAIL">{% if h.fail %}<b>{{ h.fail }}</b>{% else %}0{% endif %}</td>
           <td class="res-WARN">{{ h.warn }}</td>
           <td class="res-PASS">{{ h.pass }}</td>
           <td><a href="{{ url_for('download_original', rec_id=h.id) }}">엑셀</a></td>

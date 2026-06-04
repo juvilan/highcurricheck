@@ -2,7 +2,10 @@
 {% block content %}
   <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
     <a class="btn" href="#" onclick="if(history.length>1){history.back();return false;}">← 뒤로</a>
-    <h2 style="margin:0; font-size:20px;">{{ school }} 검토 결과</h2>
+    <h2 style="margin:0; font-size:20px;">{% if counts['FAIL'] %}❌{% else %}✅{% endif %} {{ school }} 검토 결과</h2>
+    {% if counts['FAIL'] %}
+      <span style="background:#b91c1c; color:#fff; border-radius:6px; padding:2px 10px; font-size:13px; font-weight:700;">FAIL {{ counts['FAIL'] }}</span>
+    {% endif %}
     {% if saved_id %}
       {% if origname %}
         <a class="btn" href="{{ url_for('download_original', rec_id=saved_id) }}">원본 엑셀 다운로드</a>
