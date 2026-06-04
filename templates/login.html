@@ -28,13 +28,13 @@
     {% if info %}<div class="info">{{ info }}</div>{% endif %}
     {% if error %}<div class="err">{{ error }}</div>{% endif %}
     <input type="hidden" name="next" value="{{ next }}">
-    <label>아이디</label>
-    <input name="username" value="{{ username or '' }}" autofocus autocomplete="username">
+    <label>이름 (실명)</label>
+    <input name="username" value="{{ username or '' }}" autofocus autocomplete="username" placeholder="예: 홍길동">
     <label>비밀번호</label>
     <input name="password" type="password" autocomplete="current-password">
     <button type="submit">로그인 / 가입</button>
-    <div class="hint">처음 보는 아이디로 로그인하면 <b>가입 신청</b>이 되고, <b>마스터 승인</b> 후 로그인할 수 있습니다.
-      검토한 자료는 본인만 볼 수 있습니다.</div>
+    <div class="hint">처음 보는 이름이면 그 비밀번호로 <b>바로 가입</b>되어 사용할 수 있습니다.
+      <b>실명</b>으로 로그인해 주세요. 검토한 자료는 본인만 볼 수 있습니다.</div>
   </form>
 </body>
 </html>
