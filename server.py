@@ -1,6 +1,7 @@
 """고등학교 교육과정 자동 검토 - Flask 서버 (Streamlit 대체, 경량)"""
 import os
 import io
+import re
 import csv
 import uuid
 import hmac
@@ -78,6 +79,7 @@ app.secret_key = _load_secret()
 # 업데이트 내역(최신순). 새 기능/수정 시 맨 위에 추가.
 CHANGELOG = [
     {"date": "2026-06-04", "items": [
+        "검토 이력 학교명 표시 개선 — 파일명에서 학교 약칭과 학년도를 뽑아 ‘광영여고 2026’처럼 표시(이전엔 ‘서울특별시교육청’으로 나오던 문제)",
         "로그인 기능 도입 — 아이디·비밀번호로 로그인. 새 아이디는 가입 신청 후 마스터 승인을 받아야 사용 가능. 자기가 올려 검토한 자료만 열람·삭제, 마스터는 전체 열람·삭제와 가입 승인 관리.",
         "이력 상세에 ‘다시 검토’ 버튼 — 보관된 원본으로 즉석 재검토해 과거 검토의 상세 결과를 다시 볼 수 있음",
         "검토 이력에 업로드한 원본 엑셀 파일을 보관(다시 내려받기 가능), 상세 결과 데이터는 더 이상 저장하지 않음",
@@ -144,6 +146,31 @@ def _inject_globals():
         "is_master": is_master(),
         "pending_count": pending,
     }
+
+
+# 파일명에서 학교 표시명을 뽑을 때 "설명" 구간으로 보고 제외할 키워드
+_DESC_KEYWORDS = ("학점", "배당", "교육과정", "입학생", "학년도", "편제", "개정", "배당표", "점검")
+
+
+def _display_school(filename):
+    """파일명에서 '약칭학교명 + 학년도'를 추출. 예) 서울특별시교육청_광영여자고등학교_
+    2026학년도 ... _광영여고.xlsx → '광영여고 2026'."""
+    stem = os.path.splitext(os.path.basename(filename or ""))[0]
+    m = re.search(r"(20\d{2})\s*학년도", stem) or re.search(r"(20\d{2})", stem)
+    year = m.group(1) if m else ""
+    parts = [p.strip() for p in stem.split("_") if p.strip()]
+    parts = [p for p in parts if "교육청" not in p]  # 행정기관 구간 제외
+    # 학교명처럼 보이는(고/중/초/학교 포함) + 설명 아닌 구간 중 약칭(짧은 쪽) 우선
+    names = [p for p in parts
+             if any(k in p for k in ("고", "중", "초", "학교"))
+             and not any(k in p for k in _DESC_KEYWORDS)]
+    if names:
+        school = min(names, key=len)
+    elif parts:
+        school = min(parts, key=len)
+    else:
+        school = stem or "업로드 파일"
+    return (school + (" " + year if year else "")).strip()
 
 
 def _counts(results):
@@ -283,13 +310,14 @@ def check():
             parsed = parse_curriculum(tmp_path)
             results = check_curriculum(parsed)
             counts = _counts(results)
-            rec_id = db.save_check(parsed["school"], parsed["sheet"], counts,
+            school = _display_school(f.filename)  # 파일명 기반 표시명(약칭+학년도)
+            rec_id = db.save_check(school, parsed["sheet"], counts,
                                    parsed["summary"], f.filename, owner=current_user())
             # 원본 엑셀을 영구 보관(상세 결과 대신)
             shutil.copyfile(tmp_path, os.path.join(ORIG_DIR, rec_id + ".xlsx"))
             _cache_results(rec_id, results)
             items.append({
-                "ok": True, "filename": f.filename, "school": parsed["school"],
+                "ok": True, "filename": f.filename, "school": school,
                 "sheet": parsed["sheet"], "counts": counts, "id": rec_id,
                 "results": results, "summary": parsed["summary"],
                 "debug": {"header_row": parsed["header_row"],
