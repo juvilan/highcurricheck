@@ -1,0 +1,58 @@
+{% extends "layout.html" %}
+{% block content %}
+  {% set pending = users | rejectattr('approved') | list %}
+  {% set approved = users | selectattr('approved') | list %}
+  <h2 style="margin:0 0 4px; font-size:20px;">가입 승인 관리</h2>
+  <div class="cap">새로 가입 신청한 사용자를 승인해야 로그인할 수 있습니다.</div>
+
+  <h3>승인 대기 ({{ pending|length }})</h3>
+  {% if not pending %}
+    <div class="callout ok">대기 중인 가입 신청이 없습니다.</div>
+  {% else %}
+    <table>
+      <thead><tr><th>아이디</th><th>신청일시</th><th>승인</th><th>거부</th></tr></thead>
+      <tbody>
+      {% for u in pending %}
+        <tr>
+          <td><b>{{ u.username }}</b></td>
+          <td>{{ (u.createdAt or '')[:16] }}</td>
+          <td>
+            <form method="post" action="{{ url_for('admin_approve', username=u.username) }}" style="display:inline;">
+              <button class="btn primary" type="submit" style="padding:3px 10px; font-size:12px;">승인</button>
+            </form>
+          </td>
+          <td>
+            <form method="post" action="{{ url_for('admin_reject', username=u.username) }}" style="display:inline;"
+                  onsubmit="return confirm('{{ u.username }} 가입 신청을 거부(삭제)할까요?');">
+              <button class="btn danger" type="submit" style="padding:3px 10px; font-size:12px;">거부</button>
+            </form>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  {% endif %}
+
+  <h3 style="margin-top:24px;">승인된 사용자 ({{ approved|length }})</h3>
+  {% if not approved %}
+    <div class="cap">아직 없습니다.</div>
+  {% else %}
+    <table>
+      <thead><tr><th>아이디</th><th>가입일시</th><th>접근 취소</th></tr></thead>
+      <tbody>
+      {% for u in approved %}
+        <tr>
+          <td><b>{{ u.username }}</b></td>
+          <td>{{ (u.createdAt or '')[:16] }}</td>
+          <td>
+            <form method="post" action="{{ url_for('admin_reject', username=u.username) }}" style="display:inline;"
+                  onsubmit="return confirm('{{ u.username }} 계정을 삭제할까요? (검토 기록은 남습니다)');">
+              <button class="btn danger" type="submit" style="padding:3px 10px; font-size:12px;">삭제</button>
+            </form>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  {% endif %}
+{% endblock %}

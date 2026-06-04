@@ -40,32 +40,58 @@ def init_db():
             conn.execute("ALTER TABLE checks ADD COLUMN origname TEXT")
         if "owner" not in cols:
             conn.execute("ALTER TABLE checks ADD COLUMN owner TEXT")
-        # 사용자 계정(자유 가입)
+        # 사용자 계정(가입 신청 → 마스터 승인)
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS users (
                 username  TEXT PRIMARY KEY,
                 pwhash    TEXT NOT NULL,
-                createdAt TEXT
+                createdAt TEXT,
+                approved  INTEGER DEFAULT 0
             )
             """
         )
+        ucols = [r[1] for r in conn.execute("PRAGMA table_info(users)").fetchall()]
+        if "approved" not in ucols:
+            conn.execute("ALTER TABLE users ADD COLUMN approved INTEGER DEFAULT 0")
+            # 기존 사용자는 승인된 것으로 간주(승인제 도입 전 가입자)
+            conn.execute("UPDATE users SET approved = 1 WHERE approved IS NULL OR approved = 0")
 
 
 def get_user(username):
     with get_conn() as conn:
         row = conn.execute(
-            "SELECT username, pwhash FROM users WHERE username = ?", (username,)
+            "SELECT username, pwhash, approved FROM users WHERE username = ?", (username,)
         ).fetchone()
     return dict(row) if row else None
 
 
-def create_user(username, pwhash):
+def create_user(username, pwhash, approved=0):
     with get_conn() as conn:
         conn.execute(
-            "INSERT INTO users (username, pwhash, createdAt) VALUES (?,?,?)",
-            (username, pwhash, datetime.now().isoformat(timespec="seconds")),
+            "INSERT INTO users (username, pwhash, createdAt, approved) VALUES (?,?,?,?)",
+            (username, pwhash, datetime.now().isoformat(timespec="seconds"), int(approved)),
         )
+
+
+def list_users():
+    """전체 사용자 — 승인 대기(approved=0) 먼저, 그 다음 승인됨."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT username, createdAt, approved FROM users "
+            "ORDER BY approved ASC, createdAt ASC"
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def approve_user(username):
+    with get_conn() as conn:
+        conn.execute("UPDATE users SET approved = 1 WHERE username = ?", (username,))
+
+
+def delete_user(username):
+    with get_conn() as conn:
+        conn.execute("DELETE FROM users WHERE username = ?", (username,))
 
 
 def save_check(school, sheet, counts, summary, origname, owner=None):

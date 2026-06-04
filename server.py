@@ -78,7 +78,7 @@ app.secret_key = _load_secret()
 # 업데이트 내역(최신순). 새 기능/수정 시 맨 위에 추가.
 CHANGELOG = [
     {"date": "2026-06-04", "items": [
-        "로그인 기능 도입 — 아이디·비밀번호로 로그인(처음 보는 아이디는 자동 가입). 자기가 올려 검토한 자료만 열람·삭제 가능. 마스터는 전체 열람·삭제.",
+        "로그인 기능 도입 — 아이디·비밀번호로 로그인. 새 아이디는 가입 신청 후 마스터 승인을 받아야 사용 가능. 자기가 올려 검토한 자료만 열람·삭제, 마스터는 전체 열람·삭제와 가입 승인 관리.",
         "이력 상세에 ‘다시 검토’ 버튼 — 보관된 원본으로 즉석 재검토해 과거 검토의 상세 결과를 다시 볼 수 있음",
         "검토 이력에 업로드한 원본 엑셀 파일을 보관(다시 내려받기 가능), 상세 결과 데이터는 더 이상 저장하지 않음",
     ]},
@@ -135,10 +135,14 @@ def _cache_results(rec_id, results):
 @app.context_processor
 def _inject_globals():
     """모든 템플릿에서 최신 업데이트 날짜·로그인 정보를 쓸 수 있게 주입."""
+    pending = 0
+    if is_master():
+        pending = sum(1 for u in db.list_users() if not u["approved"])
     return {
         "latest_update": CHANGELOG[0]["date"] if CHANGELOG else "",
         "user": current_user(),
         "is_master": is_master(),
+        "pending_count": pending,
     }
 
 
@@ -197,14 +201,18 @@ def login():
             err = "마스터 비밀번호가 올바르지 않습니다."
         else:
             u = db.get_user(username)
-            if u is None:  # 처음 보는 아이디 → 가입
-                db.create_user(username, generate_password_hash(password))
+            if u is None:  # 처음 보는 아이디 → 가입 신청(승인 대기)
+                db.create_user(username, generate_password_hash(password), approved=0)
+                return render_template(
+                    "login.html", next=nxt,
+                    info="가입 신청이 접수되었습니다. 마스터 승인 후 로그인할 수 있습니다.")
+            elif not check_password_hash(u["pwhash"], password):
+                err = "비밀번호가 올바르지 않습니다."
+            elif not u["approved"]:
+                err = "아직 승인 대기 중입니다. 마스터 승인을 기다려 주세요."
+            else:
                 session["user"] = username
                 return redirect(nxt)
-            if check_password_hash(u["pwhash"], password):
-                session["user"] = username
-                return redirect(nxt)
-            err = "비밀번호가 올바르지 않습니다."
         return render_template("login.html", error=err, username=username, next=nxt)
     return render_template("login.html", next=request.args.get("next", ""))
 
@@ -213,6 +221,35 @@ def login():
 def logout():
     session.clear()
     return redirect(url_for("login"))
+
+
+def _require_master():
+    if not is_master():
+        abort(403)
+
+
+@app.route("/admin/users")
+def admin_users():
+    """가입 승인 관리(마스터 전용)."""
+    _require_master()
+    return render_template("admin_users.html", users=db.list_users())
+
+
+@app.route("/admin/approve/<username>", methods=["POST"])
+def admin_approve(username):
+    _require_master()
+    if username != MASTER_USERNAME:
+        db.approve_user(username)
+    return redirect(url_for("admin_users"))
+
+
+@app.route("/admin/reject/<username>", methods=["POST"])
+def admin_reject(username):
+    """가입 거부/사용자 삭제(마스터 전용). 해당 사용자의 검토 기록은 남음."""
+    _require_master()
+    if username != MASTER_USERNAME:
+        db.delete_user(username)
+    return redirect(url_for("admin_users"))
 
 
 @app.route("/")
