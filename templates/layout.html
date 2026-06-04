@@ -52,7 +52,7 @@
       <div class="hist">
         {% for h in history %}
           <a href="{{ url_for('history_view', rec_id=h.id) }}"{% if h.fail %} style="border-color:#fecaca; background:#fef2f2;"{% endif %}>
-            <div>{% if h.fail %}❌{% else %}✅{% endif %} <b>{{ h.school }}</b></div>
+            <div>{% if h.fail %}❌{% else %}✅{% endif %} <b>{{ h.school }}</b>{% if h.seq_total and h.seq_total > 1 %} <span style="color:var(--muted);">({{ h.seq }}번째{% if h.seq == h.seq_total %}·최신{% endif %})</span>{% endif %}</div>
             <div class="meta">{{ h.checkedAt[:16] }} ·
               <span class="badge res-FAIL">F{{ h.fail }}</span>
               <span class="badge res-WARN">W{{ h.warn }}</span>

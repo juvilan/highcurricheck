@@ -85,6 +85,7 @@ app.secret_key = _load_secret()
 # 업데이트 내역(최신순). 새 기능/수정 시 맨 위에 추가.
 CHANGELOG = [
     {"date": "2026-06-04", "items": [
+        "수정본 재검토 구분 — 같은 학교를 다시 검토하면 이력에 ‘(2번째·최신)’처럼 회차를 표시(옛 기록도 그대로 보존, 같은 파일명 다시 올려도 덮어쓰지 않음).",
         "FAIL 한눈에 보기 — 검토 이력·사이드바·배치 요약·상세에 ❌(FAIL 있음)/✅(없음) 표시와 빨간 강조. 이력 상단엔 FAIL 건수 집계.",
         "업로드 편의 개선 — 드래그앤드롭 지원, 선택 개수 표시, 한 번에 최대 100개(총 40MB) 안내. 한도 초과 시 깨진 화면 대신 안내 메시지(이전 16MB 제한에서 상향).",
         "검토 이력·결과 표시와 다운로드 파일명을 ‘학년도_학교’ 순으로 통일 — 예: ‘2026_광영여고’, 원본 ‘2026_광영여고.xlsx’, CSV ‘2026_광영여고_검토결과.csv’(연도순 정렬 편의).",
@@ -249,9 +250,23 @@ def _grouped(results):
     return list(by_area.items())
 
 
+def _annotate_seq(rows):
+    """같은 (작성자, 표시학교명) 그룹에 검토 회차(seq)를 부여. 재검토(수정본)를
+    '2026_광영여고 (2번째)'처럼 구분하기 위함. 회차는 시간순(오래된 게 1)."""
+    groups = {}
+    for r in rows:
+        groups.setdefault((r.get("owner"), r.get("school")), []).append(r)
+    for g in groups.values():
+        for i, r in enumerate(sorted(g, key=lambda x: x.get("checkedAt") or ""), 1):
+            r["seq"] = i
+            r["seq_total"] = len(g)
+    return rows
+
+
 def _sidebar_history():
     """사이드바/목록용 이력 — 마스터는 전체, 일반 사용자는 본인 것만."""
-    return db.list_checks(limit=500, owner=None if is_master() else current_user())
+    return _annotate_seq(
+        db.list_checks(limit=500, owner=None if is_master() else current_user()))
 
 
 def _render_results(school, sheet, results, summary, debug=None, saved_id=None,

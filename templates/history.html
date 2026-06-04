@@ -19,7 +19,7 @@
       {% for h in history %}
         <tr{% if h.fail %} style="background:#fef2f2;"{% endif %}>
           <td style="text-align:center; font-size:16px;">{% if h.fail %}❌{% else %}✅{% endif %}</td>
-          <td><a href="{{ url_for('history_view', rec_id=h.id) }}"><b>{{ h.school }}</b></a></td>
+          <td><a href="{{ url_for('history_view', rec_id=h.id) }}"><b>{{ h.school }}</b></a>{% if h.seq_total and h.seq_total > 1 %} <span class="cap" style="margin:0;">({{ h.seq }}번째{% if h.seq == h.seq_total %}·최신{% endif %})</span>{% endif %}</td>
           {% if is_master %}<td>{{ h.owner or '—' }}</td>{% endif %}
           <td>{{ h.checkedAt[:16] }}</td>
           <td class="res-FAIL">{% if h.fail %}<b>{{ h.fail }}</b>{% else %}0{% endif %}</td>
