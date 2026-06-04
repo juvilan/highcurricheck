@@ -111,6 +111,21 @@ def check_curriculum(parsed):
         f"불일치 {len(nb6)}건","PASS" if not nb6 else "FAIL",
         "; ".join(f"R{r} {nm}: 운영{o:.0f}≠배치{s:.0f}" for r,nm,o,s in nb6) or "이상 없음")
 
+    # B7: 한국사 Ⅰ·Ⅱ 모두 편성 + 각 3학점 (2022 개정: 한국사1/2 각 3, 총 6)
+    ks = [x for x in rows if '한국사' in x['과목명']]
+    ks1 = [x for x in ks if '1' in x['과목명'] or 'Ⅰ' in x['과목명']]
+    ks2 = [x for x in ks if '2' in x['과목명'] or 'Ⅱ' in x['과목명']]
+    ks_bad = [x for x in ks if x['운영학점'] is not None and x['운영학점'] != 3]
+    ks_prob = []
+    if not ks1: ks_prob.append("한국사1(Ⅰ) 미편성")
+    if not ks2: ks_prob.append("한국사2(Ⅱ) 미편성")
+    ks_prob += [f"R{x['row']} {x['과목명']}={x['운영학점']}(≠3)" for x in ks_bad]
+    add("B7","B.학점범위","한국사 1·2 각 3학점","한국사Ⅰ·Ⅱ 모두 편성, 각 3학점",
+        f"한국사 {len(ks)}건",
+        "PASS" if (ks1 and ks2 and not ks_bad) else "FAIL",
+        "; ".join(ks_prob) if ks_prob
+        else "한국사Ⅰ·Ⅱ 각 3학점 정상 (" + ", ".join(f"{x['과목명']}={x['운영학점']}" for x in ks) + ")")
+
     # ====== C. 편성 순서 ======
     # C1: 교과군별로 공통 과목이 선택 과목보다 앞 행에 와야 함. (표가 교과군별로
     # 정리돼 있으므로 시트 전체 글로벌 비교는 오탐 → 같은 교과군 안에서만 비교)
@@ -168,6 +183,14 @@ def check_curriculum(parsed):
     add("C5","C.편성순서","종교 과목 복수 편성","종교+종교외",
         f"종교 {len(종교)}건","N/A" if not 종교 else "INFO",
         "종교 미편성" if not 종교 else "수동 확인")
+
+    # C6: 체육 총 운영학점 ≥ 10 (2022 개정: 체육 10학점 이상 + 매 학기[C3])
+    체육과목 = [x for x in rows if '체육' in x['교과군'].replace(' ', '')]
+    체육합 = sum((x['운영학점'] or 0) for x in 체육과목)
+    add("C6","C.편성순서","체육 10학점 이상","체육 총 운영학점 ≥ 10",
+        f"{체육합:.0f}학점", "PASS" if 체육합 >= 10 else "FAIL",
+        ("체육 과목: " + ", ".join(f"{x['과목명']}={x['운영학점']}" for x in 체육과목))
+        if 체육과목 else "체육 과목 없음")
 
     # ====== D. 균형 ======
     tt = summary.get('총학기') or []
