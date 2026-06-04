@@ -30,7 +30,7 @@ _RESULT_TOKENS = OrderedDict()
 _RESULT_TOKENS_MAX = 50
 
 # 비번이 필요한 경로(저장된 이력·원본 열람/관리). 그 외(검증 등)는 공개.
-PROTECTED_PREFIXES = ("/history", "/original", "/export", "/delete")
+PROTECTED_PREFIXES = ("/history", "/original", "/export", "/delete", "/recheck")
 
 # 검토 상세 결과 임시 캐시(즉시 보기/CSV용). DB엔 상세를 저장하지 않으므로
 # 방금 검토한 건만 상세 표를 보여주고, 이후엔 원본 파일로 대체.
@@ -58,6 +58,7 @@ AUTH_PASSWORD = _load_password()
 # 업데이트 내역(최신순). 새 기능/수정 시 맨 위에 추가.
 CHANGELOG = [
     {"date": "2026-06-04", "items": [
+        "이력 상세에 ‘다시 검토’ 버튼 — 보관된 원본으로 즉석 재검토해 과거 검토의 상세 결과를 다시 볼 수 있음(비번 필요)",
         "접근 권한 분리 — 검토(업로드·결과 보기)는 비번 없이 누구나, 저장된 이력 목록·과거 기록 열람·원본 다운로드는 비번 필요",
         "비밀번호 접근 제한 추가 — 공용 비밀번호 인증",
         "검토 이력에 업로드한 원본 엑셀 파일을 보관(다시 내려받기 가능), 상세 결과 데이터는 더 이상 저장하지 않음",
@@ -274,6 +275,23 @@ def history_view(rec_id):
     return _render_results(rec["school"], rec["sheet"], results,
                            rec["summary"], saved_id=rec_id, counts=counts,
                            origname=rec.get("origname"))
+
+
+@app.route("/recheck/<rec_id>", methods=["POST"])
+def recheck(rec_id):
+    """보관된 원본으로 다시 검토 → 상세 결과를 캐시에 채우고 상세 화면으로."""
+    rec = db.get_check(rec_id)
+    if not rec:
+        abort(404)
+    path = os.path.join(ORIG_DIR, rec_id + ".xlsx")
+    if not os.path.exists(path):
+        abort(404)
+    try:
+        parsed = parse_curriculum(path)
+        _cache_results(rec_id, check_curriculum(parsed))
+    except Exception:
+        return redirect(url_for("history_view", rec_id=rec_id, recheck_error=1))
+    return redirect(url_for("history_view", rec_id=rec_id))
 
 
 @app.route("/original/<rec_id>.xlsx")

@@ -29,10 +29,18 @@
   </div>
 
   {% if not results %}
+    {% if request.args.get('recheck_error') %}
+      <div class="callout fail" style="margin-top:16px;">보관된 원본을 다시 검토하지 못했습니다. 원본 파일을 직접 확인해 주세요.</div>
+    {% endif %}
     <div class="callout" style="margin-top:16px;">
-      상세 항목은 따로 보관하지 않습니다. 위 <b>‘원본 엑셀 다운로드’</b>로 파일을 받아 확인하세요.
-      (위 카운트는 검토 당시 집계값입니다.)
+      상세 항목은 따로 보관하지 않습니다. 아래 <b>‘다시 검토’</b>로 보관된 원본을 재검토하거나,
+      <b>‘원본 엑셀 다운로드’</b>로 파일을 받아 확인하세요. (위 카운트는 검토 당시 집계값입니다.)
     </div>
+    {% if saved_id and origname %}
+      <form method="post" action="{{ url_for('recheck', rec_id=saved_id) }}" style="margin-top:10px;">
+        <button class="btn primary" type="submit">보관된 원본으로 다시 검토</button>
+      </form>
+    {% endif %}
   {% else %}
   <h3>주요 발견 사항</h3>
   {% if not fails and not warns %}
