@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>로그인 · 고등학교 교육과정 자동 검토</title>
+<style>
+  body{ margin:0; font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Segoe UI",Roboto,sans-serif;
+        color:#111827; background:#f9fafb; display:flex; min-height:100vh; align-items:center; justify-content:center; }
+  .box{ background:#fff; border:1px solid #d1d5db; border-radius:14px; padding:28px 26px; width:340px; }
+  h1{ font-size:19px; margin:0 0 4px; }
+  .cap{ color:#6b7280; font-size:13px; margin-bottom:18px; }
+  label{ display:block; font-size:13px; color:#374151; margin:12px 0 4px; }
+  input{ width:100%; padding:10px 12px; border:1px solid #d1d5db; border-radius:8px; font-size:14px; }
+  button{ width:100%; margin-top:18px; padding:11px; border:0; border-radius:8px; background:#1d4ed8; color:#fff;
+          font-size:14px; cursor:pointer; }
+  .err{ background:#fef2f2; border:1px solid #fecaca; color:#7f1d1d; padding:10px 12px; border-radius:8px;
+        font-size:13px; margin-bottom:14px; }
+  .hint{ color:#6b7280; font-size:12px; margin-top:14px; line-height:1.5; }
+</style>
+</head>
+<body>
+  <form class="box" method="post" action="{{ url_for('login') }}">
+    <h1>교육과정 검토 로그인</h1>
+    <div class="cap">2022 개정 교육과정 자율점검표 기반</div>
+    {% if error %}<div class="err">{{ error }}</div>{% endif %}
+    <input type="hidden" name="next" value="{{ next }}">
+    <label>아이디</label>
+    <input name="username" value="{{ username or '' }}" autofocus autocomplete="username">
+    <label>비밀번호</label>
+    <input name="password" type="password" autocomplete="current-password">
+    <button type="submit">로그인 / 가입</button>
+    <div class="hint">처음 보는 아이디로 로그인하면 그 비밀번호로 <b>자동 가입</b>됩니다.
+      검토한 자료는 본인만 볼 수 있습니다.</div>
+  </form>
+</body>
+</html>

@@ -11,13 +11,14 @@
   {% else %}
     <table style="margin-top:14px;">
       <thead><tr>
-        <th>학교</th><th>검토일시</th><th>FAIL</th><th>WARN</th><th>PASS</th>
+        <th>학교</th>{% if is_master %}<th>작성자</th>{% endif %}<th>검토일시</th><th>FAIL</th><th>WARN</th><th>PASS</th>
         <th>원본</th><th>삭제</th>
       </tr></thead>
       <tbody>
       {% for h in history %}
         <tr>
           <td><a href="{{ url_for('history_view', rec_id=h.id) }}"><b>{{ h.school }}</b></a></td>
+          {% if is_master %}<td>{{ h.owner or '—' }}</td>{% endif %}
           <td>{{ h.checkedAt[:16] }}</td>
           <td class="res-FAIL">{{ h.fail }}</td>
           <td class="res-WARN">{{ h.warn }}</td>

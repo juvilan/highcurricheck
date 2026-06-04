@@ -34,22 +34,51 @@ def init_db():
             )
             """
         )
-        # 구 DB 호환: origname 컬럼이 없으면 추가
+        # 구 DB 호환: 누락 컬럼 추가
         cols = [r[1] for r in conn.execute("PRAGMA table_info(checks)").fetchall()]
         if "origname" not in cols:
             conn.execute("ALTER TABLE checks ADD COLUMN origname TEXT")
+        if "owner" not in cols:
+            conn.execute("ALTER TABLE checks ADD COLUMN owner TEXT")
+        # 사용자 계정(자유 가입)
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS users (
+                username  TEXT PRIMARY KEY,
+                pwhash    TEXT NOT NULL,
+                createdAt TEXT
+            )
+            """
+        )
 
 
-def save_check(school, sheet, counts, summary, origname):
+def get_user(username):
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT username, pwhash FROM users WHERE username = ?", (username,)
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def create_user(username, pwhash):
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO users (username, pwhash, createdAt) VALUES (?,?,?)",
+            (username, pwhash, datetime.now().isoformat(timespec="seconds")),
+        )
+
+
+def save_check(school, sheet, counts, summary, origname, owner=None):
     """검토 1건 저장. counts는 {'PASS':n,'FAIL':n,'WARN':n,'INFO':n,'N/A':n}.
-    상세 결과(results)는 보관하지 않고 원본 파일(origname)로 대체한다."""
+    상세 결과(results)는 보관하지 않고 원본 파일(origname)로 대체한다.
+    owner는 검토를 올린 사용자명."""
     rec_id = uuid.uuid4().hex
     with get_conn() as conn:
         conn.execute(
             """
             INSERT INTO checks
-                (id, school, sheet, checkedAt, pass, fail, warn, info, na, summary, results, origname)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+                (id, school, sheet, checkedAt, pass, fail, warn, info, na, summary, results, origname, owner)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 rec_id,
@@ -64,18 +93,24 @@ def save_check(school, sheet, counts, summary, origname):
                 json.dumps(summary, ensure_ascii=False),
                 "[]",  # 상세 결과는 저장하지 않음
                 origname,
+                owner,
             ),
         )
     return rec_id
 
 
-def list_checks(limit=100):
+def list_checks(limit=100, owner=None):
+    """owner 지정 시 해당 사용자 검토만, None이면 전체(마스터용)."""
+    sql = ("SELECT id, school, sheet, checkedAt, pass, fail, warn, info, na, owner "
+           "FROM checks ")
+    params = []
+    if owner is not None:
+        sql += "WHERE owner = ? "
+        params.append(owner)
+    sql += "ORDER BY checkedAt DESC LIMIT ?"
+    params.append(limit)
     with get_conn() as conn:
-        rows = conn.execute(
-            "SELECT id, school, sheet, checkedAt, pass, fail, warn, info, na "
-            "FROM checks ORDER BY checkedAt DESC LIMIT ?",
-            (limit,),
-        ).fetchall()
+        rows = conn.execute(sql, tuple(params)).fetchall()
     return [dict(r) for r in rows]
 
 

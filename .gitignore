@@ -6,3 +6,4 @@ checks.db
 /tmp/
 uploads/
 .auth_password
+.flask_secret

@@ -11,8 +11,9 @@ from urllib.parse import quote
 
 from flask import (
     Flask, request, render_template, redirect, url_for, abort, Response,
-    send_file
+    send_file, session
 )
+from werkzeug.security import generate_password_hash, check_password_hash
 
 from parser import parse_curriculum
 from checker import check_curriculum
@@ -29,9 +30,6 @@ ORIG_DIR = os.path.join(BASE_DIR, "uploads")  # 원본 엑셀 영구 보관(<rec
 _RESULT_TOKENS = OrderedDict()
 _RESULT_TOKENS_MAX = 50
 
-# 비번이 필요한 경로(저장된 이력·원본 열람/관리). 그 외(검증 등)는 공개.
-PROTECTED_PREFIXES = ("/history", "/original", "/export", "/delete", "/recheck")
-
 # 검토 상세 결과 임시 캐시(즉시 보기/CSV용). DB엔 상세를 저장하지 않으므로
 # 방금 검토한 건만 상세 표를 보여주고, 이후엔 원본 파일로 대체.
 _RESULT_CACHE = OrderedDict()
@@ -39,9 +37,13 @@ _RESULT_CACHE_MAX = 50
 
 RESULT_ORDER = ["PASS", "FAIL", "WARN", "INFO", "N/A"]
 
+# 로그인 없이 접근 가능한 엔드포인트
+PUBLIC_ENDPOINTS = {"login", "logout", "static"}
+MASTER_USERNAME = "master"
+
 
 def _load_password():
-    """접근 비밀번호: 환경변수 CURRI_PASSWORD 우선, 없으면 .auth_password 파일."""
+    """마스터 비밀번호: 환경변수 CURRI_PASSWORD 우선, 없으면 .auth_password 파일."""
     pw = os.environ.get("CURRI_PASSWORD")
     if pw and pw.strip():
         return pw.strip()
@@ -53,14 +55,31 @@ def _load_password():
     return None
 
 
-AUTH_PASSWORD = _load_password()
+MASTER_PASSWORD = _load_password()
+
+
+def _load_secret():
+    """세션 서명 키: .flask_secret 파일에 영구 보관(없으면 생성)."""
+    path = os.path.join(BASE_DIR, ".flask_secret")
+    if os.path.exists(path):
+        with open(path, "rb") as fh:
+            data = fh.read().strip()
+            if data:
+                return data
+    secret = os.urandom(32).hex().encode()
+    with open(path, "wb") as fh:
+        fh.write(secret)
+    os.chmod(path, 0o600)
+    return secret
+
+
+app.secret_key = _load_secret()
 
 # 업데이트 내역(최신순). 새 기능/수정 시 맨 위에 추가.
 CHANGELOG = [
     {"date": "2026-06-04", "items": [
-        "이력 상세에 ‘다시 검토’ 버튼 — 보관된 원본으로 즉석 재검토해 과거 검토의 상세 결과를 다시 볼 수 있음(비번 필요)",
-        "접근 권한 분리 — 검토(업로드·결과 보기)는 비번 없이 누구나, 저장된 이력 목록·과거 기록 열람·원본 다운로드는 비번 필요",
-        "비밀번호 접근 제한 추가 — 공용 비밀번호 인증",
+        "로그인 기능 도입 — 아이디·비밀번호로 로그인(처음 보는 아이디는 자동 가입). 자기가 올려 검토한 자료만 열람·삭제 가능. 마스터는 전체 열람·삭제.",
+        "이력 상세에 ‘다시 검토’ 버튼 — 보관된 원본으로 즉석 재검토해 과거 검토의 상세 결과를 다시 볼 수 있음",
         "검토 이력에 업로드한 원본 엑셀 파일을 보관(다시 내려받기 가능), 상세 결과 데이터는 더 이상 저장하지 않음",
     ]},
     {"date": "2026-06-02", "items": [
@@ -84,26 +103,27 @@ CHANGELOG = [
 db.init_db()
 
 
-def _is_authed():
-    """비번 일치 여부. 비번 미설정이면 항상 통과."""
-    if AUTH_PASSWORD is None:
-        return True
-    a = request.authorization
-    return bool(a and hmac.compare_digest((a.password or ""), AUTH_PASSWORD))
+def current_user():
+    return session.get("user")
+
+
+def is_master():
+    return session.get("user") == MASTER_USERNAME
+
+
+def _can_access(rec):
+    """마스터는 전체, 일반 사용자는 본인 검토만."""
+    return is_master() or (rec.get("owner") == current_user())
 
 
 @app.before_request
-def _require_auth():
-    """보호 경로(이력·원본)만 Basic Auth. 검증 등 그 외 경로는 공개."""
-    if AUTH_PASSWORD is None:
+def _require_login():
+    """로그인 필수. 로그인/정적 외 모든 경로는 로그인해야 접근."""
+    if request.endpoint in PUBLIC_ENDPOINTS:
         return None
-    if not any(request.path.startswith(p) for p in PROTECTED_PREFIXES):
-        return None
-    if _is_authed():
-        return None
-    resp = Response("인증이 필요합니다.", 401)
-    resp.headers["WWW-Authenticate"] = 'Basic realm="curri-check", charset="UTF-8"'
-    return resp
+    if not current_user():
+        return redirect(url_for("login", next=request.path))
+    return None
 
 
 def _cache_results(rec_id, results):
@@ -114,10 +134,11 @@ def _cache_results(rec_id, results):
 
 @app.context_processor
 def _inject_globals():
-    """모든 템플릿에서 최신 업데이트 날짜·인증여부를 쓸 수 있게 주입."""
+    """모든 템플릿에서 최신 업데이트 날짜·로그인 정보를 쓸 수 있게 주입."""
     return {
         "latest_update": CHANGELOG[0]["date"] if CHANGELOG else "",
-        "authed": _is_authed(),
+        "user": current_user(),
+        "is_master": is_master(),
     }
 
 
@@ -133,11 +154,16 @@ def _grouped(results):
     return list(by_area.items())
 
 
+def _sidebar_history():
+    """사이드바/목록용 이력 — 마스터는 전체, 일반 사용자는 본인 것만."""
+    return db.list_checks(limit=500, owner=None if is_master() else current_user())
+
+
 def _render_results(school, sheet, results, summary, debug=None, saved_id=None,
                     counts=None, origname=None):
     return render_template(
         "results.html",
-        history=db.list_checks(limit=200),
+        history=_sidebar_history(),
         school=school,
         sheet=sheet,
         results=results,
@@ -152,9 +178,46 @@ def _render_results(school, sheet, results, summary, debug=None, saved_id=None,
     )
 
 
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    """로그인 + 자유 가입(처음 보는 아이디면 그 비번으로 가입)."""
+    if current_user():
+        return redirect(url_for("index"))
+    if request.method == "POST":
+        username = (request.form.get("username") or "").strip()
+        password = request.form.get("password") or ""
+        nxt = request.form.get("next") or url_for("index")
+        err = None
+        if not username or not password:
+            err = "아이디와 비밀번호를 입력하세요."
+        elif username == MASTER_USERNAME:
+            if MASTER_PASSWORD and hmac.compare_digest(password, MASTER_PASSWORD):
+                session["user"] = MASTER_USERNAME
+                return redirect(nxt)
+            err = "마스터 비밀번호가 올바르지 않습니다."
+        else:
+            u = db.get_user(username)
+            if u is None:  # 처음 보는 아이디 → 가입
+                db.create_user(username, generate_password_hash(password))
+                session["user"] = username
+                return redirect(nxt)
+            if check_password_hash(u["pwhash"], password):
+                session["user"] = username
+                return redirect(nxt)
+            err = "비밀번호가 올바르지 않습니다."
+        return render_template("login.html", error=err, username=username, next=nxt)
+    return render_template("login.html", next=request.args.get("next", ""))
+
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect(url_for("login"))
+
+
 @app.route("/")
 def index():
-    return render_template("index.html", history=db.list_checks(limit=200))
+    return render_template("index.html", history=_sidebar_history())
 
 
 @app.route("/check", methods=["POST"])
@@ -169,7 +232,7 @@ def check():
 
     bad = [f.filename for f in files if not f.filename.lower().endswith(".xlsx")]
     if bad:
-        return render_template("index.html", history=db.list_checks(limit=200),
+        return render_template("index.html", history=_sidebar_history(),
                                error="`.xlsx` 파일만 업로드할 수 있습니다: " + ", ".join(bad))
 
     os.makedirs(UPLOAD_DIR, exist_ok=True)
@@ -184,7 +247,7 @@ def check():
             results = check_curriculum(parsed)
             counts = _counts(results)
             rec_id = db.save_check(parsed["school"], parsed["sheet"], counts,
-                                   parsed["summary"], f.filename)
+                                   parsed["summary"], f.filename, owner=current_user())
             # 원본 엑셀을 영구 보관(상세 결과 대신)
             shutil.copyfile(tmp_path, os.path.join(ORIG_DIR, rec_id + ".xlsx"))
             _cache_results(rec_id, results)
@@ -213,8 +276,9 @@ def check():
             except Exception:
                 pass
 
-    # PRG: POST 결과를 직접 렌더링하지 않고 공개 결과 페이지(토큰)로 리다이렉트.
-    # 토큰을 가진 사람(=방금 업로드한 본인)만 결과를 보며, 비번 없이 열람 가능.
+    # PRG: 단일 성공은 본인 이력 상세로, 여러 개면 요약(토큰) 페이지로 리다이렉트.
+    if len(items) == 1 and items[0].get("ok"):
+        return redirect(url_for("history_view", rec_id=items[0]["id"]))
     token = uuid.uuid4().hex
     _RESULT_TOKENS[token] = items
     while len(_RESULT_TOKENS) > _RESULT_TOKENS_MAX:
@@ -224,39 +288,24 @@ def check():
 
 @app.route("/result/<token>")
 def result_view(token):
-    """방금 검토한 결과(공개). 단일이면 상세, 여러 개면 요약 카드."""
+    """방금 일괄 검토한 결과 요약(로그인 사용자). 상세는 각자 이력으로 연결."""
     items = _RESULT_TOKENS.get(token)
     if items is None:  # 재시작 등으로 만료된 토큰
         return redirect(url_for("index"))
-    if len(items) == 1 and items[0].get("ok"):
-        it = items[0]
-        return _render_results(it["school"], it["sheet"], it["results"],
-                               it["summary"], debug=it.get("debug"))
-    return render_template("batch.html", items=items, token=token)
-
-
-@app.route("/result/<token>/<int:idx>")
-def result_detail(token, idx):
-    """일괄 결과에서 개별 파일 상세(공개)."""
-    items = _RESULT_TOKENS.get(token)
-    if items is None or idx < 0 or idx >= len(items) or not items[idx].get("ok"):
-        return redirect(url_for("index"))
-    it = items[idx]
-    return _render_results(it["school"], it["sheet"], it["results"],
-                           it["summary"], debug=it.get("debug"))
+    return render_template("batch.html", items=items, history=_sidebar_history())
 
 
 @app.route("/updates")
 def updates():
     latest = CHANGELOG[0]["date"] if CHANGELOG else ""
-    return render_template("updates.html", history=db.list_checks(limit=200),
+    return render_template("updates.html", history=_sidebar_history(),
                            changelog=CHANGELOG, latest=latest)
 
 
 @app.route("/history")
 def history_list():
-    """저장된 검토 이력 목록(비번 보호)."""
-    return render_template("history.html", history=db.list_checks(limit=500))
+    """검토 이력 목록 — 마스터는 전체, 일반 사용자는 본인 것만."""
+    return render_template("history.html", history=_sidebar_history())
 
 
 @app.route("/history/<rec_id>")
@@ -264,6 +313,8 @@ def history_view(rec_id):
     rec = db.get_check(rec_id)
     if not rec:
         abort(404)
+    if not _can_access(rec):
+        abort(403)
     # 상세 결과는 보관하지 않으므로, 방금 검토한 건(캐시)만 상세 표를 보여주고
     # 그 외에는 DB의 카운트만 표시 + 원본 다운로드로 안내.
     results = _RESULT_CACHE.get(rec_id, [])
@@ -283,6 +334,8 @@ def recheck(rec_id):
     rec = db.get_check(rec_id)
     if not rec:
         abort(404)
+    if not _can_access(rec):
+        abort(403)
     path = os.path.join(ORIG_DIR, rec_id + ".xlsx")
     if not os.path.exists(path):
         abort(404)
@@ -299,6 +352,8 @@ def download_original(rec_id):
     rec = db.get_check(rec_id)
     if not rec or not rec.get("origname"):
         abort(404)
+    if not _can_access(rec):
+        abort(403)
     path = os.path.join(ORIG_DIR, rec_id + ".xlsx")
     if not os.path.exists(path):
         abort(404)
@@ -307,13 +362,16 @@ def download_original(rec_id):
 
 @app.route("/delete/<rec_id>", methods=["POST"])
 def delete(rec_id):
+    rec = db.get_check(rec_id)
+    if rec and not _can_access(rec):
+        abort(403)
     db.delete_check(rec_id)
     _RESULT_CACHE.pop(rec_id, None)
     try:
         os.unlink(os.path.join(ORIG_DIR, rec_id + ".xlsx"))
     except OSError:
         pass
-    return redirect(url_for("index"))
+    return redirect(url_for("history_list"))
 
 
 @app.route("/export/<rec_id>.csv")
@@ -321,6 +379,8 @@ def export_csv(rec_id):
     rec = db.get_check(rec_id)
     if not rec:
         abort(404)
+    if not _can_access(rec):
+        abort(403)
     results = _RESULT_CACHE.get(rec_id) or rec["results"]
     if not results:  # 상세 미보관 → 원본 파일로 대체
         return redirect(url_for("download_original", rec_id=rec_id))

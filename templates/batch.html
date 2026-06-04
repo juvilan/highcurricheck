@@ -15,7 +15,7 @@
           <b style="font-size:16px;">{{ it.school }}</b>
           <span class="cap" style="margin:0;">{{ it.filename }} · 시트 <code>{{ it.sheet }}</code></span>
           <span style="margin-left:auto;"></span>
-          <a class="btn" href="{{ url_for('result_detail', token=token, idx=loop.index0) }}">상세 보기</a>
+          <a class="btn" href="{{ url_for('history_view', rec_id=it.id) }}">상세 보기</a>
         </div>
         <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
           {% for k, v in it.counts.items() %}

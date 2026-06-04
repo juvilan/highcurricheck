@@ -45,9 +45,9 @@
 </head>
 <body>
 <div class="wrap">
-  {% if authed %}
+  {% if user %}
   <aside class="side">
-    <h2>검토 이력</h2>
+    <h2>{% if is_master %}전체 검토 이력{% else %}내 검토 이력{% endif %}</h2>
     {% if history %}
       <div class="hist">
         {% for h in history %}
@@ -70,8 +70,12 @@
   <main class="main">
     <div style="display:flex; align-items:baseline; gap:12px; flex-wrap:wrap;">
       <h1>고등학교 교육과정 자동 검토</h1>
-      <a href="{{ url_for('history_list') }}" style="margin-left:auto; font-size:13px;">🔒 검토 이력</a>
-      <a href="{{ url_for('updates') }}" style="font-size:13px;">🔔 업데이트 내역{% if latest_update %} ({{ latest_update }}){% endif %}</a>
+      {% if user %}
+        <span style="margin-left:auto; font-size:13px; color:#374151;">👤 <b>{{ user }}</b>{% if is_master %} <span style="color:#b45309;">(마스터)</span>{% endif %}</span>
+        <a href="{{ url_for('history_list') }}" style="font-size:13px;">📋 검토 이력</a>
+        <a href="{{ url_for('updates') }}" style="font-size:13px;">🔔 업데이트{% if latest_update %} ({{ latest_update }}){% endif %}</a>
+        <a href="{{ url_for('logout') }}" style="font-size:13px;">로그아웃</a>
+      {% endif %}
     </div>
     <div class="cap">2022 개정 교육과정 · 자율점검표 기반</div>
     {% if latest_update %}
