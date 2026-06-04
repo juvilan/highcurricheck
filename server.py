@@ -83,6 +83,7 @@ app.secret_key = _load_secret()
 # 업데이트 내역(최신순). 새 기능/수정 시 맨 위에 추가.
 CHANGELOG = [
     {"date": "2026-06-04", "items": [
+        "다운로드 파일명을 ‘학년도_학교’ 순으로 정리 — 원본은 ‘2026_광영여고.xlsx’, CSV는 ‘2026_광영여고_검토결과.csv’ 형식(연도순 정렬 편의).",
         "동시 사용 안정성 개선 — 여러 명이 동시에 검토·열람해도 안전하도록 처리(SQLite WAL/대기시간, 메모리 캐시 잠금). 사용자 삭제 시 그 검토 기록은 마스터로 귀속(같은 이름 재가입자가 남의 기록을 보던 문제 차단).",
         "검토 이력 학교명 표시 개선 — 파일명에서 학교 약칭과 학년도를 뽑아 ‘광영여고 2026’처럼 표시(이전엔 ‘서울특별시교육청’으로 나오던 문제)",
         "로그인 기능 도입 — 실명·비밀번호로 로그인(처음 이름은 바로 가입, 승인 불필요). 자기가 올려 검토한 자료만 열람·삭제, 마스터는 전체 열람·삭제와 사용자 관리.",
@@ -203,6 +204,19 @@ def _display_school(filename):
                        and not re.fullmatch(r"20\d{2}.*", s)), None) or (segs[0] if segs else "")
     school = school or "업로드 파일"
     return (school + (" " + year if year else "")).strip()
+
+
+def _filename_base(school):
+    """표시명 '광영여고 2026' → 다운로드 파일명용 '2026_광영여고'(학년도_학교 순).
+    연도가 없으면 학교명만. 파일명에 위험한 문자는 제거."""
+    s = (school or "").strip()
+    m = re.search(r"\s*(20\d{2})\s*$", s)
+    if m:
+        name, year = s[:m.start()].strip(), m.group(1)
+        base = f"{year}_{name}" if name else year
+    else:
+        base = s or "검토자료"
+    return re.sub(r'[\\/:*?"<>|]', "", base).strip()
 
 
 def _counts(results):
@@ -442,7 +456,8 @@ def download_original(rec_id):
     path = os.path.join(ORIG_DIR, rec_id + ".xlsx")
     if not os.path.exists(path):
         abort(404)
-    return send_file(path, as_attachment=True, download_name=rec["origname"])
+    return send_file(path, as_attachment=True,
+                     download_name=_filename_base(rec["school"]) + ".xlsx")
 
 
 @app.route("/delete/<rec_id>", methods=["POST"])
@@ -475,7 +490,7 @@ def export_csv(rec_id):
     w = csv.DictWriter(buf, fieldnames=cols, extrasaction="ignore")
     w.writeheader()
     w.writerows(results)
-    fname = f"{rec['school']}_검토결과.csv"
+    fname = f"{_filename_base(rec['school'])}_검토결과.csv"
     fname_q = quote(fname)  # RFC 5987: 헤더에 들어가는 값은 퍼센트 인코딩 필요
     return Response(
         buf.getvalue(),
