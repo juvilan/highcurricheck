@@ -8,3 +8,6 @@ checks.db-*
 uploads/
 .auth_password
 .flask_secret
+
+# 도구 캐시
+.serena/
