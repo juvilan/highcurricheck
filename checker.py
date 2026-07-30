@@ -20,8 +20,13 @@ def check_curriculum(parsed):
     add("A2","A.총량","교과 174학점","174학점",
         f"{gyo:.0f}" if gyo else "미산출",
         "PASS" if gyo == 174 else "FAIL", "교과 이수 학점 소계")
+    # A3: 교과 소계행의 '필수 이수 학점' 열(parser가 헤더 라벨로 탐지)을 읽어 자동 판정.
+    # 열을 못 찾은 파일은 예전처럼 수동 확인으로 남긴다.
+    req = summary.get('필수이수')
     add("A3","A.총량","필수 이수 학점 ≥ 84","84학점 이상",
-        "수동확인 권장","INFO","비고/색상 마킹 분석 필요")
+        f"{req:.0f}" if req is not None else "미산출",
+        ("PASS" if req >= 84 else "FAIL") if req is not None else "INFO",
+        "교과 소계행 필수 이수 학점" if req is not None else "필수 이수 학점 열 미탐지 — 수동 확인")
     add("A4","A.총량","창의적 체험활동 18학점","18학점(288시간)",
         f"{chang:.0f}" if chang else "미산출",
         "PASS" if chang == 18 else "FAIL", f"학기별 = {summary.get('창체학기')}")
