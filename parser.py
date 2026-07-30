@@ -37,6 +37,26 @@ def _to_num(v):
     return float(m.group()) if m else None
 
 
+def _norm_subject_type(t):
+    """과목유형 표기 정규화.
+
+    학교별로 '일반/진로/융합'처럼 약어를 쓰지만, 자율점검표(checker)는
+    표준어 '일반선택/진로선택/융합선택'을 기대한다. 부분일치로 흡수해
+    '일반', '일반선택', '전공 일반' 등을 모두 같은 표준어로 매핑한다.
+    """
+    t = _norm(t)
+    key = t.replace(" ", "")
+    if "공통" in key:
+        return "공통"
+    if "진로" in key:
+        return "진로선택"
+    if "융합" in key:
+        return "융합선택"
+    if "일반" in key:
+        return "일반선택"
+    return t
+
+
 def find_target_sheet(wb):
     """'xxxx입학생' 시트 탐지 (괄호 부기·공백 허용)"""
     for name in wb.sheetnames:
@@ -71,21 +91,32 @@ def official_subjects(wb):
     return out
 
 
-def find_data_range(ws):
-    """헤더/데이터/합계 영역 행 번호 자동 탐지"""
-    header_row, data_start, summary_start = None, None, None
-    for r in range(1, min(ws.max_row, 30) + 1):
-        if _norm(ws.cell(r, 2).value) == "교과(군)":
-            header_row, data_start = r, r + 4
+def find_data_range(cell, max_row):
+    """헤더/데이터/합계 영역 행 번호 자동 탐지 (병합 인식 cell 사용)"""
+    header_row, summary_start = None, None
+    for r in range(1, min(max_row, 30) + 1):
+        if _norm(cell(r, 2)) == "교과(군)":
+            header_row = r
             break
-    for r in range(ws.max_row, 0, -1):
+    for r in range(max_row, 0, -1):
         for c in range(1, 5):
-            v = _norm(ws.cell(r, c).value).replace(" ", "")
+            v = _norm(cell(r, c)).replace(" ", "")
             if "교과이수학점소계" in v:
                 summary_start = r
                 break
         if summary_start:
             break
+    # data_start: 헤더~합계 사이에서 '과목명이 있고 학점이 숫자인' 첫 행을 스캔.
+    # 헤더 높이·spacer 행이 파일마다 달라 고정 오프셋(header+4)은 부정확하다.
+    # (실제로 어떤 학교 파일에서는 첫 과목이 통째로 누락됐다)
+    data_start = None
+    if header_row and summary_start:
+        for r in range(header_row + 1, summary_start):
+            subj = _norm(cell(r, 4))
+            base, run = _to_num(cell(r, 5)), _to_num(cell(r, 6))
+            if subj and (base is not None or run is not None):
+                data_start = r
+                break
     return header_row, data_start, summary_start
 
 
@@ -105,13 +136,7 @@ def parse_curriculum(source):
         )
     ws = wb[sheet]
 
-    h, ds, ss = find_data_range(ws)
-    if not (h and ds and ss):
-        raise ValueError(
-            f"데이터 범위 탐지 실패 (header={h}, data_start={ds}, summary_start={ss})"
-        )
-
-    # ----- 병합 셀 forward-fill -----
+    # ----- 병합 셀 forward-fill (탐지보다 먼저: find_data_range가 병합 인식) -----
     # vmerged: 세로(여러 행) 병합에 속한 칸. 선택그룹 학기칸(예: "12(택4)")이 행마다
     # 복제되는데, 이건 과목별 배치가 아니라 그룹 총합이라 배치합 계산에서 제외해야 한다.
     mmap = {}
@@ -127,6 +152,12 @@ def parse_curriculum(source):
 
     def cell(r, c):
         return mmap.get((r, c), ws.cell(r, c).value)
+
+    h, ds, ss = find_data_range(cell, ws.max_row)
+    if not (h and ds and ss):
+        raise ValueError(
+            f"데이터 범위 탐지 실패 (header={h}, data_start={ds}, summary_start={ss})"
+        )
 
     # ----- 과목 행 파싱 -----
     rows = []
@@ -169,7 +200,7 @@ def parse_curriculum(source):
         rows.append({
             "row": r,
             "교과군": gun,
-            "과목유형": typ,
+            "과목유형": _norm_subject_type(typ),
             "과목명": subj,
             "기본학점": _to_num(cell(r, 5)),
             "운영학점": _to_num(cell(r, 6)),
@@ -186,6 +217,17 @@ def parse_curriculum(source):
         })
 
     # ----- 합계 영역 파싱 -----
+    # 필수 이수 학점 열을 헤더 라벨로 탐지한다(고정 열 번호를 쓰지 않는다).
+    # 소계행에서 이 열을 읽어 A3(필수 이수 ≥ 84)를 자동 판정할 수 있다.
+    req_col = None
+    for c in range(1, ws.max_column + 1):
+        for hr in range(h, h + 3):
+            if "필수이수학점" in _norm(cell(hr, c)).replace(" ", ""):
+                req_col = c
+                break
+        if req_col:
+            break
+
     summary = {}
     for r in range(ss, min(ws.max_row, ss + 10) + 1):
         for c in range(1, 5):
@@ -196,6 +238,8 @@ def parse_curriculum(source):
             if "교과 이수 학점 소계" in lbl:
                 summary["교과소계"] = _to_num(cell(r, 6))
                 summary["교과학기"] = terms
+                if req_col:
+                    summary["필수이수"] = _to_num(cell(r, req_col))
             if "창의적 체험활동" in lbl:
                 summary["창체"] = _to_num(cell(r, 6))
                 summary["창체학기"] = terms
