@@ -55,30 +55,39 @@ def test_checker_actually_evaluates_electives(parsed):
     assert "6건" in c4["측정값"]
 
 
-def test_d2_current_behavior_is_국수영_vs_81(parsed):
-    """현재 D2는 국·수·영 합만 고정 상한 81과 비교한다 — 지금 동작을 고정해 둔다.
+def test_d2_sums_기초교과_including_한국사(parsed):
+    """D2는 기초교과 = 국·수·영 + 한국사 를 합산한다.
 
-    81은 174×50% − 한국사 6을 미리 빼 둔 값이다. 즉 교과총 174, 한국사 6이라는
-    두 가정이 박혀 있다.
-    """
-    d2 = next(r for r in check_curriculum(parsed) if r["id"] == "D2")
-    assert d2["측정값"] == "105"          # 국·수·영만
-    assert "81" in d2["기준"]
-
-
-@pytest.mark.xfail(reason="D2가 한국사를 합산하지 않고 상한을 교과총의 50%로 계산하지 않는다 "
-                          "— 교육과정 규정 해석이 필요한 미해결 항목", strict=True)
-def test_d2_should_use_기초교과_50_percent_rule(parsed):
-    """규정대로라면 기초교과(국·수·영·한국사) ≤ 교과 총 이수학점의 50%여야 한다.
-
-    표본: 국·수·영 105 + 한국사 6 = 111 > 87(174의 50%) → FAIL.
-    현재 구현은 한국사를 빼고 105 ≤ 81 만 보므로 이 기대를 만족하지 못한다.
-    fix/parser-robustness 브랜치에는 이 방식으로 계산하는 구현이 있었다.
+    한국사는 교과군이 '사회(역사/도덕 포함)'라 국·수·영 합산에서 빠지므로
+    과목명으로 따로 더해야 한다. 표본: 국·수·영 105 + 한국사 6 = 111.
     """
     d2 = next(r for r in check_curriculum(parsed) if r["id"] == "D2")
     assert "한국사" in d2["항목"]
     assert d2["측정값"] == "111"
+    assert "국·수·영 105 + 한국사 6 = 111" in d2["근거"]
+
+
+def test_d2_limit_is_half_of_교과총_not_hardcoded_81(parsed):
+    """상한은 교과 총 이수학점의 50%를 계산한다 — 고정값 81이 아니다.
+
+    81은 174×50% − 한국사 6 을 미리 빼 둔 값이라 '교과총 174, 한국사 6'이
+    박혀 있었다. 표본은 교과총 174 → 한도 87.
+    """
+    d2 = next(r for r in check_curriculum(parsed) if r["id"] == "D2")
     assert "87" in d2["기준"]
+    assert "174" in d2["기준"]
+    assert "81" not in d2["기준"]
+
+
+def test_d2_warns_instead_of_fails_when_선택조건_있음(parsed):
+    """한도를 넘어도 기초교과에 선택과목/비고 '택'이 있으면 FAIL이 아니라 WARN.
+
+    운영학점 합은 선택 조건을 반영하지 않은 상한값이라, 실제 이수는 선택에 따라
+    줄 수 있다. 표본은 111 > 87 이지만 국·수·영에 선택과목이 있어 WARN이어야 한다.
+    """
+    d2 = next(r for r in check_curriculum(parsed) if r["id"] == "D2")
+    assert d2["결과"] == "WARN"
+    assert "수동확인" in d2["근거"]
 
 
 def test_a3_auto_detects_required_credits(parsed):
